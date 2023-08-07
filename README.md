@@ -5,14 +5,16 @@ _Please note that all code, files, forms, templates, or other materials provided
 _Any users, developers, or adapters of the Repo Contents or any deployments or instances thereof should proceed with caution and use at their own risk._
 
 
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
 
 ChainLocker is a non-custodial, user-defined-and-deployed escrow deployment protocol. Each ChainLocker is a separate contract deployment, and is designed to only hold one type of asset. The locked assets are programmatically released provided all deployer-defined conditions are met when <code>execute()</code> is called, including optional oracle-fed data conditions which are known as “value conditions,” or otherwise transferred at the deployer-defined expiry time according to the deployer-defined deposit and refundability rules. 
 
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
 
 
-__ChainLockerFactory.sol__: factory contract for ChainLocker deployments (TokenLocker or EthLocker) based upon the various parameters passed to <code>deployChainLocker()</code>. Has a fee switch for deployments using this factory, which is initially off. For deployments with a non-zero <code>ValueCondition</code>, the execution of the ChainLocker pre-expiry is reliant upon the accurate operation and security of the applicable <code>dataFeedProxy</code> contract (specifically its <code>read()</code> function) so users are advised to carefully verify and monitor such contract. The parameters for a ChainLocker deployment by calling <code>deployChainLocker()</code> are:
+### ChainLockerFactory.sol
+
+Factory contract for ChainLocker deployments (TokenLocker or EthLocker) based upon the various parameters passed to <code>deployChainLocker()</code>. Has a fee switch for deployments using this factory, which is initially off. For deployments with a non-zero <code>ValueCondition</code>, the execution of the ChainLocker pre-expiry is reliant upon the accurate operation and security of the applicable <code>dataFeedProxy</code> contract (specifically its <code>read()</code> function) so users are advised to carefully verify and monitor such contract. The parameters for a ChainLocker deployment by calling <code>deployChainLocker()</code> are:
 
 -	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at expiry
 -	<code>_openOffer</code>: Boolean of whether the ChainLocker is open to any buyer address (<code>true</code>) or only the designated <code> buyer</code> address
@@ -32,10 +34,12 @@ __ChainLockerFactory.sol__: factory contract for ChainLocker deployments (TokenL
 -	<code>_dataFeedProxy</code> address which will be called if <code>_valueCondition</code> > 0 in <code>execute</code> which must correctly implement the <code>read()</code> function as defined in the <code>IProxy interface</code>. Intended to utilize API3’s dAPIs.
   
 
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
 
 
-____EthLocker.sol____: non-custodial escrow smart contract with native gas token as locked asset, with the following parameters (as may be supplied by the ChainLockerFactory’s <code>deployChainLocker()</code> function or directly in the EthLocker <code>constructor()</code>:
+### EthLocker.sol
+
+Non-custodial escrow smart contract with native gas token as locked asset, with the following parameters (as may be supplied by the ChainLockerFactory’s <code>deployChainLocker()</code> function or directly in the EthLocker <code>constructor()</code>:
 -	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at expiry
 -	<code>_openOffer</code>: Boolean of whether the EthLocker is open to any buyer address (<code>true</code>) or only the designated <code> buyer</code> address
 -	<code>_valueCondition</code>: enum (uint8) of external data value condition for execution. Enum values are as follows (the same as specified above for <code>deployChainLocker()</code> in <code>ChainLockerFactory</code>):
@@ -61,10 +65,12 @@ When each of <code>buyer</code> and <code>seller</code> are ready to execute the
 
 The <code>checkIfExpired()</code> function may also be called by any address at any time, and if it has indeed expired, the locked assets will be transferred according to the deployer-defined refundability rules. 
 
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
 
 
-____TokenLocker.sol____: non-custodial escrow smart contract with mirrored functionality as ‘EthLocker’, but with an ERC20 token as locked asset and the ability to lock such tokens via EIP2612 ‘permit’ function (if applicable). Uses the following parameters (as may be supplied by the ChainLockerFactory’s <code>deployChainLocker()</code> function or directly in the TokenLocker <code>constructor()</code>:
+### TokenLocker.sol
+
+Non-custodial escrow smart contract with mirrored functionality as ‘EthLocker’, but with an ERC20 token as locked asset and the ability to lock such tokens via EIP2612 ‘permit’ function (if applicable). Uses the following parameters (as may be supplied by the ChainLockerFactory’s <code>deployChainLocker()</code> function or directly in the TokenLocker <code>constructor()</code>:
 -	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at expiry
 -	<code>_openOffer</code>: Boolean of whether the TokenLocker is open to any buyer address (<code>true</code>) or only the designated <code> buyer</code> address
 -	<code>_valueCondition</code>: enum (uint8) of external data value condition for execution. Enum values are as follows (the same as specified above for <code>deployChainLocker()</code> in <code>ChainLockerFactory</code>):
@@ -90,8 +96,10 @@ When each of <code>buyer</code> and <code>seller</code> are ready to execute the
 
 The <code>checkIfExpired()</code> function may also be called by any address at any time, and if it has indeed expired, the locked tokens will be transferred according to the deployer-defined refundability rules. 
 
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
 
 
-____Receipt.sol____: informational contract which allows a user to receive an immutable receipt of a transaction's value in USD (if the asset has a proper <code>dataFeedProxy</code> supplied to the <code>tokenToProxy</code> mapping) by calling <code>printReceipt()</code>. Callers are also provided a <code>paymentId</code> if they print a receipt, which can be used to check their applicable USD value at any time by calling <code>paymentIdToUsdValue()</code>, supplying their paymentId as a parameter. Data feed proxy contracts may be added, updated, and removed only by this contract’s <code>admin</code>. As this contract is purely informational, optional, and never a contingency for a ChainLocker’s operation, the remainder of the ChainLocker protocol remains entirely ownerless and non-custodial.
+### Receipt.sol
+
+Informational contract which allows a user to receive an immutable receipt of a transaction's value in USD (if the asset has a proper <code>dataFeedProxy</code> supplied to the <code>tokenToProxy</code> mapping) by calling <code>printReceipt()</code>. Callers are also provided a <code>paymentId</code> if they print a receipt, which can be used to check their applicable USD value at any time by calling <code>paymentIdToUsdValue()</code>, supplying their paymentId as a parameter. Data feed proxy contracts may be added, updated, and removed only by this contract’s <code>admin</code>. As this contract is purely informational, optional, and never a contingency for a ChainLocker’s operation, the remainder of the ChainLocker protocol remains entirely ownerless and non-custodial.
 
