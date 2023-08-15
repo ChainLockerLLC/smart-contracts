@@ -294,10 +294,14 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
 
     /// @notice for the current 'buyer' to designate a new buyer address
     /// @param _buyer: new address of buyer
-    function updateBuyer(address payable _buyer) external {
+    function updateBuyer(address payable _buyer) external nonReentrant {
         if (msg.sender != buyer) revert EthLocker_NotBuyer();
 
+        // transfer 'amountDeposited[buyer]' to the new '_buyer', delete the existing buyer's 'amountDeposited', and update the 'buyer' state variable
         if (!checkIfExpired()) {
+            amountDeposited[_buyer] = amountDeposited[buyer];
+            delete amountDeposited[buyer];
+
             buyer = _buyer;
             emit EthLocker_BuyerUpdated(_buyer);
         }
