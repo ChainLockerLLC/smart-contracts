@@ -390,9 +390,10 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
     function rejectDepositor(address payable _depositor) external nonReentrant {
         if (msg.sender != seller) revert EthLocker_NotSeller();
         if (!openOffer) revert EthLocker_OnlyOpenOffer();
-        // reset 'deposited' and 'buyer' variables if 'seller' passed 'buyer' as '_depositor'
+        // reset 'deposited', 'buyerApproved', and 'buyer' variables if 'seller' passed 'buyer' as '_depositor'
         if (_depositor == buyer) {
             delete deposited;
+            delete buyerApproved;
             delete buyer;
             emit EthLocker_BuyerUpdated(address(0));
         }
