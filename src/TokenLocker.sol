@@ -553,9 +553,10 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
     function rejectDepositor(address _depositor) external nonReentrant {
         if (msg.sender != seller) revert TokenLocker_NotSeller();
         if (!openOffer) revert TokenLocker_OnlyOpenOffer();
-        // reset 'deposited' and 'buyer' variables if 'seller' passed 'buyer' as '_depositor'
+        // reset 'deposited', 'buyerApproved', and 'buyer' variables if 'seller' passed 'buyer' as '_depositor'
         if (_depositor == buyer) {
             delete deposited;
+            delete buyerApproved;
             delete buyer;
             emit TokenLocker_BuyerUpdated(address(0));
         }
