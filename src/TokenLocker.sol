@@ -407,39 +407,37 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
         safeTransferFrom(tokenContract, _depositor, address(this), _amount);
     }
 
-    /// @notice deposit value to 'address(this)' via safeTransferFrom '_amount' of tokens from '_depositor'; provided '_depositor' has approved address(this) to transferFrom such 'amount'
-    /** @dev '_depositor' must have erc20.approve(address(this), _amount) prior to calling this function
-     ** max '_amount limit of 'totalAmount', and if 'totalAmount' is already held or escrow has expired, revert. Updates boolean and emits event when 'deposit' reached
+    /// @notice deposit value to 'address(this)' via safeTransferFrom '_amount' of tokens from msg.sender; provided msg.sender has approved address(this) to transferFrom such 'amount'
+    /** @dev msg.sender must have erc20.approve(address(this), _amount) prior to calling this function
+     ** max '_amount limit of 'totalAmount', and if 'totalAmount' is already held or this TokenLocker has expired, revert. Updates boolean and emits event when 'deposit' reached
      ** also updates 'buyer' to msg.sender if true 'openOffer' and false 'deposited', and
      ** records amount deposited by msg.sender in case of refundability or where 'seller' rejects a 'buyer' and buyer's deposited amount is to be returned  */
-    /// @param _depositor: depositor of the '_amount' of tokens, likely msg.sender, but must == 'buyer' this is not an open offer (!openOffer)
-    /// @param _amount: amount of tokens deposited
-    function depositTokens(
-        address _depositor,
-        uint256 _amount
-    ) external nonReentrant {
+    /// @param _amount: amount of tokens deposited. If 'openOffer', '_amount' must == 'totalAmount'
+    function depositTokens(uint256 _amount) external nonReentrant {
         uint256 _balance = erc20.balanceOf(address(this)) + _amount;
         if (_balance > totalAmount)
             revert TokenLocker_BalanceExceedsTotalAmount();
-        if (!openOffer && _depositor != buyer) revert TokenLocker_NotBuyer();
-        if (erc20.allowance(_depositor, address(this)) < _amount)
+        if (!openOffer && msg.sender != buyer) revert TokenLocker_NotBuyer();
+        if (erc20.allowance(msg.sender, address(this)) < _amount)
             revert TokenLocker_AmountNotApprovedForTransferFrom();
         if (expirationTime <= block.timestamp) revert TokenLocker_IsExpired();
+        if (openOffer && _balance < totalAmount)
+            revert TokenLocker_MustDepositTotalAmount();
 
         if (_balance >= deposit && !deposited) {
             // if this TokenLocker is an open offer and was not yet accepted (thus '!deposited'), make depositing address the 'buyer' and update 'deposited' to true
             if (openOffer) {
-                buyer = _depositor;
-                emit TokenLocker_BuyerUpdated(_depositor);
+                buyer = msg.sender;
+                emit TokenLocker_BuyerUpdated(msg.sender);
             }
             deposited = true;
-            emit TokenLocker_DepositInEscrow(_depositor);
+            emit TokenLocker_DepositInEscrow(msg.sender);
         }
         if (_balance == totalAmount) emit TokenLocker_TotalAmountInEscrow();
 
         emit TokenLocker_AmountReceived(_amount);
-        amountDeposited[_depositor] += _amount;
-        safeTransferFrom(tokenContract, _depositor, address(this), _amount);
+        amountDeposited[msg.sender] += _amount;
+        safeTransferFrom(tokenContract, msg.sender, address(this), _amount);
     }
 
     /// @notice for the current seller to designate a new recipient address
