@@ -61,6 +61,7 @@ contract ChainLockerFactory {
 
     /// @notice address which may update the fee parameters and receives any fees if 'feeSwitch' == true
     address payable public receiver;
+    address payable private _pendingReceiver;
 
     /// @notice whether a fee is payable for using 'deployChainLocker()'
     bool public feeSwitch;
@@ -88,6 +89,8 @@ contract ChainLockerFactory {
         uint256 newFeeDenominator,
         uint256 newMinimumFee
     );
+
+    event ChainLockerFactory_ReceiverUpdate(address newReceiver);
 
     ///
     /// ERRORS
@@ -244,11 +247,23 @@ contract ChainLockerFactory {
         );
     }
 
-    /// @notice allows the receiver of msg.value fees (if feeSwitch == true) to replace their address
+    /// @notice allows the 'receiver' to replace their address. First step in two-step address change.
     /// @dev use care in updating 'receiver' to a contract with complex receive() function due to the 'call' usage in this contract
-    /// @param _newReceiver: new payable address for 'receiver'
+    /// @param _newReceiver: new payable address for pending 'receiver', who must accept the role by calling 'acceptReceiverRole'
     function updateReceiver(address payable _newReceiver) external {
         if (msg.sender != receiver) revert ChainLockerFactory_OnlyReceiver();
-        receiver = _newReceiver;
+        _pendingReceiver = _newReceiver;
+    }
+
+    /// @notice for the pending new receiver to accept the role transfer.
+    /// @dev access restricted to the address stored as '_pendingReceiver' to accept the two-step change. Transfers 'receiver' role to the caller and deletes '_pendingReceiver' to reset.
+    function acceptReceiverRole() external {
+        address payable _sender = payable(msg.sender);
+        if (_sender != _pendingReceiver) {
+            revert ChainLockerFactory_OnlyReceiver();
+        }
+        delete _pendingReceiver;
+        receiver = _sender;
+        emit ChainLockerFactory_ReceiverUpdate(_sender);
     }
 }
