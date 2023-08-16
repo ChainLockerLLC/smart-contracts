@@ -265,7 +265,8 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
         if (address(this).balance > totalAmount)
             revert EthLocker_BalanceExceedsTotalAmount();
         if (expirationTime <= block.timestamp) revert EthLocker_IsExpired();
-
+        if (openOffer && address(this).balance < totalAmount)
+            revert EthLocker_MustDepositTotalAmount();
         if (address(this).balance >= deposit && !deposited) {
             // if this EthLocker is an open offer and was not yet accepted (thus '!deposited'), make depositing address the 'buyer' and update 'deposited' to true
             if (openOffer) {
