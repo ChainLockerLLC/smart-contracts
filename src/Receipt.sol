@@ -26,6 +26,7 @@ contract Receipt {
     uint256 internal constant ONE_DAY = 86400;
 
     address public admin;
+    address private _pendingAdmin;
     // since 'paymentId' acts as an index/counter that is returned and emitted with each call of 'printReceipt()', no need for public visibility
     uint256 internal paymentId;
 
@@ -49,6 +50,7 @@ contract Receipt {
     /// EVENTS
     ///
 
+    event Receipt_AdminUpdated(address newAdmin);
     event Receipt_ProxyUpdated(address token, address proxy);
     event Receipt_ReceiptPrinted(
         uint256 indexed paymentId,
@@ -69,15 +71,13 @@ contract Receipt {
     /// @dev 'receipt' is stamped in the calling contract or address, but a caller may also save their transaction hash or 'paymentId' to access USD value
     /// @param _token: contract address of token with dAPI/data feed proxy
     /// @param _tokenAmount: amount of '_token'
+    /// @param _decimals: decimals of '_token' for USD value calculation (18 for wei)
     function printReceipt(
         address _token,
-        uint256 _tokenAmount
+        uint256 _tokenAmount,
+        uint256 _decimals
     ) external returns (uint256, uint256) {
-        // the maximum positive value that an int224 can represent is == the maximum value of uint223
-        // therefore, to prevent overflow in the _usdValue calculation (a uint256), require a '_tokenAmount'
-        // less than the maximum value of uint33
-        if (_tokenAmount == 0 || _tokenAmount > type(uint32).max)
-            revert Receipt_ImproperAmount();
+        if (_tokenAmount == 0) revert Receipt_ImproperAmount();
         if (tokenToProxy[_token] == address(0))
             revert Receipt_TokenNotSupported();
 
@@ -100,8 +100,9 @@ contract Receipt {
             _value < int224(0)
         ) revert Receipt_StalePrice();
 
-        // USD value is equal to the USD price of one token * the amount of tokens, exclusive of decimals
-        uint256 _usdValue = uint224(_value) * _tokenAmount;
+        // USD value is equal to the USD price of one token * the amount of tokens, divided by 10^decimals
+        uint256 _usdValue = (uint224(_value) * _tokenAmount) /
+            (10 ** _decimals);
 
         paymentIdToUsdValue[paymentId] = _usdValue;
 
@@ -120,10 +121,21 @@ contract Receipt {
         emit Receipt_ProxyUpdated(_token, _proxy);
     }
 
-    /// @notice for the current 'admin' to update their address
-    /// @dev 'admin' can pass address(0) to fully relinquish control, though it may be preferable to retain an admin to add new tokens and proxies or update broken proxies
+    /// @notice for the current 'admin' to update their address. First step in two-step address change.
+    /// @dev 'admin' can pass address(0) to fully relinquish control, though it is likely preferable to retain an admin to add new tokens and proxies or update broken proxies
+    /// @param _newAdmin: new address for pending 'admin', who must accept the role by calling 'acceptAdminRole'
     function updateAdmin(address _newAdmin) external {
         if (msg.sender != admin) revert Receipt_OnlyAdmin();
-        admin = _newAdmin;
+        _pendingAdmin = _newAdmin;
+    }
+
+    /// @notice for the '_pendingAdmin' to accept the role transfer and become 'admin'.
+    /// @dev access restricted to the address stored as '_pendingAdmin' to accept the two-step change. Transfers 'admin' role to the caller and deletes '_pendingAdmin' to reset the variable.
+    function acceptAdminRole() external {
+        // only '_pendingAdmin' can accept the role
+        if (msg.sender != _pendingAdmin) revert Receipt_OnlyAdmin();
+        delete _pendingAdmin;
+        admin = msg.sender;
+        emit Receipt_AdminUpdated(msg.sender);
     }
 }
