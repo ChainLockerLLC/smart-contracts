@@ -389,6 +389,8 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
         if (!openOffer && _depositor != buyer) revert TokenLocker_NotBuyer();
         if (_deadline < block.timestamp || expirationTime <= block.timestamp)
             revert TokenLocker_IsExpired();
+        if (openOffer && _balance < totalAmount)
+            revert TokenLocker_MustDepositTotalAmount();
 
         if (_balance >= deposit && !deposited) {
             // if this TokenLocker is an open offer and was not yet accepted (thus '!deposited'), make depositing address the 'buyer' and update 'deposited' to true
