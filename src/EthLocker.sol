@@ -15,7 +15,8 @@ pragma solidity 0.8.18;
 interface IReceipt {
     function printReceipt(
         address token,
-        uint256 tokenAmount
+        uint256 tokenAmount,
+        uint256 decimals
     ) external returns (uint256, uint256);
 }
 
@@ -111,6 +112,8 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
 
     // 60 seconds * 60 minutes * 24 hours
     uint256 internal constant ONE_DAY = 86400;
+    // 18 decimals for wei
+    uint256 internal constant DECIMALS = 18;
 
     IProxy public immutable dataFeedProxy;
     ValueCondition public immutable valueCondition;
@@ -130,6 +133,7 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
     address payable public seller;
 
     mapping(address => uint256) public amountDeposited;
+    mapping(address => uint256) public amountWithdrawable;
 
     ///
     /// EVENTS
@@ -176,6 +180,7 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
     error EthLocker_BalanceExceedsTotalAmount();
     error EthLocker_DepositGreaterThanTotalAmount();
     error EthLocker_IsExpired();
+    error EthLocker_MustDepositTotalAmount();
     error EthLocker_NotReadyToExecute();
     error EthLocker_NotBuyer();
     error EthLocker_NotSeller();
@@ -197,7 +202,7 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
      *** Passed as uint8 rather than enum for easier composability */
     /// @param _maximumValue: the maximum permitted int224 value returned from the applicable dAPI / API3 data feed upon which the ChainLocker's execution is conditioned. Ignored if '_valueCondition' == 0 or _valueCondition == 2.
     /// @param _minimumValue: the minimum permitted int224 value returned from the applicable dAPI / API3 data feed upon which the ChainLocker's execution is conditioned. Ignored if '_valueCondition' == 0 or _valueCondition == 1.
-    /// @param _deposit: deposit amount in wei, which must be <= '_totalAmount' (< for partial deposit, == for full deposit)
+    /// @param _deposit: deposit amount in wei, which must be <= '_totalAmount' (< for partial deposit, == for full deposit). If 'openOffer', msg.sender must deposit entire 'totalAmount', but if '_refundable', this amount will be refundable to the accepting address of the open offer (buyer) at expiry if not yet executed
     /// @param _totalAmount: total amount in wei which will be deposited in this contract, ultimately intended for '_seller'
     /// @param _expirationTime: _expirationTime in seconds (Unix time), which will be compared against block.timestamp. input type(uint256).max for no expiry (not recommended, as funds will only be released upon execution or if seller rejects depositor -- refunds only process at expiry)
     /// @param _seller: the seller's address, recipient of the '_totalAmount' if the contract executes
@@ -226,7 +231,7 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
             (_valueCondition == 3 && _maximumValue < _minimumValue)
         ) revert EthLocker_ValueConditionConflict();
 
-        if (!_openOffer) buyer = _buyer;
+        buyer = _buyer;
         refundable = _refundable;
         openOffer = _openOffer;
         valueCondition = ValueCondition(_valueCondition);
@@ -257,9 +262,9 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
             );
     }
 
-    /// @notice deposit value simply by sending 'msg.value' to 'address(this)'
+    /// @notice deposit value simply by sending 'msg.value' to 'address(this)'; if openOffer, msg.sender must deposit 'totalAmount'
     /** @dev max msg.value limit of 'totalAmount', and if 'totalAmount' is already held or escrow has expired, revert. Updates boolean and emits event when 'deposit' reached
-     ** also updates 'buyer' to msg.sender if true 'openOffer' and false 'deposited', and
+     ** also updates 'buyer' to msg.sender if true 'openOffer' and false 'deposited' (msg.sender must send 'totalAmount' to accept an openOffer), and
      ** records amount deposited by msg.sender in case of refundability or where 'seller' rejects a 'buyer' and buyer's deposited amount is to be returned  */
     receive() external payable {
         if (address(this).balance > totalAmount)
@@ -338,7 +343,7 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
         // delete approvals
         delete sellerApproved;
         delete buyerApproved;
-        
+
         // only perform these checks if ChainLocker execution is contingent upon specified external value condition(s)
         if (valueCondition != ValueCondition.None) {
             (int224 _returnedValue, uint32 _timestamp) = dataFeedProxy.read();
@@ -381,41 +386,55 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
     function getReceipt(
         uint256 _weiAmount
     ) external returns (uint256 _paymentId, uint256 _usdValue) {
-        return RECEIPT.printReceipt(address(0), _weiAmount);
+        return RECEIPT.printReceipt(address(0), _weiAmount, DECIMALS);
     }
 
-    /// @notice for an openOffer 'seller' to reject a 'buyer' or any other address and cause the return of their deposited amount (such as one that sent < 'deposit' ETH)
-    /// @param _depositor: address for reimbursement in addition to 'buyer' (if 'deposited'). If buyer sent < 'deposit' ETH to address(this), 'seller' should pass 'buyer' address here
-    /** @dev deletes 'buyer' and buyer's 'amountDeposited', returning applicable funds, and resets the 'deposited' and 'buyer' variables to re-open the offer if deposit was in place.
-     ** also permits seller to return deposited amount to an address that sent < 'deposit' ETH to address(this) */
+    /// @notice for a 'seller' to reject any depositing address (including 'buyer') and enable their withdrawal of their deposited amount in 'withdraw()'
+    /// @param _depositor: address being rejected by 'seller' which will subsequently be able to withdraw their 'amountDeposited' in 'withdraw()'
+    /// @dev if !openOffer and 'seller' passes 'buyer' to this function, 'buyer' will need to call 'updateBuyer' to choose another address and re-deposit tokens.
     function rejectDepositor(address payable _depositor) external nonReentrant {
         if (msg.sender != seller) revert EthLocker_NotSeller();
-        if (!openOffer) revert EthLocker_OnlyOpenOffer();
-        // reset 'deposited', 'buyerApproved', and 'buyer' variables if 'seller' passed 'buyer' as '_depositor'
+
+        uint256 _amtDeposited = amountDeposited[_depositor];
+        if (_amtDeposited == 0) revert EthLocker_ZeroAmount();
+
+        delete amountDeposited[_depositor];
+        // regardless of whether '_depositor' is 'buyer', permit them to withdraw their 'amountWithdrawable' balance
+        amountWithdrawable[_depositor] = _amtDeposited;
+
+        // reset 'deposited' and 'buyerApproved' variables if 'seller' passed 'buyer' as '_depositor'
         if (_depositor == buyer) {
             delete deposited;
             delete buyerApproved;
-            delete buyer;
-            emit EthLocker_BuyerUpdated(address(0));
-        }
-        uint256 _depositAmount = amountDeposited[_depositor];
-        // regardless of whether '_depositor' is 'buyer', if the address has a positive deposited balance, return it to them
-        if (_depositAmount > 0) {
-            delete amountDeposited[_depositor];
-            safeTransferETH(_depositor, _depositAmount);
-            emit EthLocker_DepositedAmountTransferred(
-                _depositor,
-                _depositAmount
-            );
+            // if 'openOffer', delete the 'buyer' variable so the next valid depositor will become 'buyer'
+            // we do not delete 'buyer' if !openOffer, to allow the 'buyer' to choose another address via 'updateBuyer', rather than irreversibly deleting the variable
+            if (openOffer) {
+                delete buyer;
+                emit EthLocker_BuyerUpdated(address(0));
+            }
         }
     }
 
-    /// @notice check if expired, and if so, handle refunds/transfers
-    /// @dev if expired, update 'isExpired', 'deposited', and 'amountDeposited' and if non-refundable, send deposit to seller before returning balance to buyer. If refundable, send entire balance back to buyer
+    /// @notice allows an address to withdraw 'amountWithdrawable' of wei, such as a refundable amount post-expiry or if seller has called 'rejectDepositor' for such an address, etc.
+    /// @dev used by a depositing address which 'seller' passed to 'rejectDepositor()', or if 'isExpired', used by 'buyer' and/or 'seller' (as applicable)
+    function withdraw() external {
+        uint256 _amt = amountWithdrawable[msg.sender];
+        if (_amt == 0) revert EthLocker_ZeroAmount();
+
+        delete amountWithdrawable[msg.sender];
+
+        safeTransferETH(payable(msg.sender), _amt);
+        emit EthLocker_DepositedAmountTransferred(msg.sender, _amt);
+    }
+
+    /// @notice check if expired, and if so, handle refundability by updating the 'amountWithdrawable' mapping as applicable
+    /** @dev if expired, update isExpired boolean. If non-refundable, update seller's 'amountWithdrawable' to be the non-refundable deposit amount before updating buyer's mapping for the remainder.
+     *** If refundable, update buyer's 'amountWithdrawable' to the entire balance. */
     /// @return isExpired
     function checkIfExpired() public nonReentrant returns (bool) {
         if (expirationTime <= block.timestamp) {
             isExpired = true;
+            uint256 _balance = address(this).balance;
             bool _isDeposited = deposited;
 
             emit EthLocker_Expired();
@@ -423,24 +442,12 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
             delete deposited;
             delete amountDeposited[buyer];
 
-            if (address(this).balance > 0) {
-                // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by a successful 'execute()', send seller the 'deposit' amount before returning the remaining escrowed amount to buyer
+            if (_balance > 0) {
+                // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by a successful 'execute()', enable 'seller' to withdraw the 'deposit' amount before enabling the remainder amount (if any) to be withdrawn by buyer
                 if (!refundable && _isDeposited) {
-                    uint256 _remainder = address(this).balance - deposit;
-                    safeTransferETH(seller, deposit);
-                    if (_remainder > 0) safeTransferETH(buyer, _remainder);
-                    emit EthLocker_DepositedAmountTransferred(seller, deposit);
-                    emit EthLocker_DepositedAmountTransferred(
-                        buyer,
-                        _remainder
-                    );
-                } else {
-                    safeTransferETH(buyer, address(this).balance);
-                    emit EthLocker_DepositedAmountTransferred(
-                        buyer,
-                        address(this).balance
-                    );
-                }
+                    amountWithdrawable[seller] = deposit;
+                    amountWithdrawable[buyer] = _balance - deposit;
+                } else amountWithdrawable[buyer] = _balance;
             }
         }
         return isExpired;
