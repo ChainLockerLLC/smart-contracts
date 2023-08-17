@@ -20,6 +20,8 @@ interface IERC20Permit {
 
     function balanceOf(address account) external view returns (uint256);
 
+    function decimals() external view returns (uint256);
+
     function permit(
         address owner,
         address spender,
@@ -35,7 +37,8 @@ interface IERC20Permit {
 interface IReceipt {
     function printReceipt(
         address token,
-        uint256 tokenAmount
+        uint256 tokenAmount,
+        uint256 decimals
     ) external returns (uint256, uint256);
 }
 
@@ -219,6 +222,7 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
     bool public sellerApproved;
 
     mapping(address => uint256) public amountDeposited;
+    mapping(address => uint256) public amountWithdrawable;
 
     ///
     /// EVENTS
@@ -267,6 +271,7 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
     error TokenLocker_BalanceExceedsTotalAmount();
     error TokenLocker_DepositGreaterThanTotalAmount();
     error TokenLocker_IsExpired();
+    error TokenLocker_MustDepositTotalAmount();
     error TokenLocker_NotBuyer();
     error TokenLocker_NotSeller();
     error TokenLocker_NonERC20Contract();
@@ -289,7 +294,7 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
      *** Passed as uint8 rather than enum for easier composability */
     /// @param _maximumValue: the maximum permitted int224 value returned from the applicable dAPI / API3 data feed upon which the ChainLocker's execution is conditioned. Ignored if '_valueCondition' == 0 or _valueCondition == 2.
     /// @param _minimumValue: the minimum permitted int224 value returned from the applicable dAPI / API3 data feed upon which the ChainLocker's execution is conditioned. Ignored if '_valueCondition' == 0 or _valueCondition == 1.
-    /// @param _deposit: deposit amount, which must be <= '_totalAmount' (< for partial deposit, == for full deposit)
+    /// @param _deposit: deposit amount, which must be <= '_totalAmount' (< for partial deposit, == for full deposit). If 'openOffer', msg.sender must deposit entire 'totalAmount', but if '_refundable', this amount will be refundable to the accepting address of the open offer (buyer) at expiry if not yet executed
     /// @param _totalAmount: total amount which will be deposited in this contract, ultimately intended for '_seller'
     /// @param _expirationTime: _expirationTime in seconds (Unix time), which will be compared against block.timestamp. input type(uint256).max for no expiry (not recommended, as funds will only be released upon execution or if seller rejects depositor -- refunds only process at expiry)
     /// @param _seller: the seller's address, recipient of the '_totalAmount' if the contract executes
@@ -370,7 +375,7 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
      ** also updates 'buyer' to msg.sender if true 'openOffer' and false 'deposited', and
      ** records amount deposited by msg.sender in case of refundability or where 'seller' rejects a 'buyer' and buyer's deposited amount is to be returned  */
     /// @param _depositor: depositor of the '_amount' of tokens, often msg.sender/originating EOA, but must == 'buyer' if this is not an open offer (!openOffer)
-    /// @param _amount: amount of tokens deposited
+    /// @param _amount: amount of tokens deposited. If 'openOffer', '_amount' must == 'totalAmount'
     /// @param _deadline: deadline for usage of the permit approval signature
     /// @param v: ECDSA sig parameter
     /// @param r: ECDSA sig parameter
@@ -543,37 +548,50 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
     function getReceipt(
         uint256 _tokenAmount
     ) external returns (uint256 _paymentId, uint256 _usdValue) {
-        return RECEIPT.printReceipt(tokenContract, _tokenAmount);
+        return
+            RECEIPT.printReceipt(tokenContract, _tokenAmount, erc20.decimals());
     }
 
-    /// @notice for an openOffer 'seller' to reject a 'buyer' or any other address and cause the return of their deposited amount (such as one that sent < 'deposit' tokens)
-    /// @param _depositor: address for reimbursement in addition to 'buyer' (if 'deposited'). If buyer sent < 'deposit' tokens to address(this), 'seller' should pass 'buyer' address here
-    /** @dev deletes 'buyer' and buyer's 'amountDeposited', returning applicable funds, and resets the 'deposited' and 'buyer' variables to re-open the offer if deposit was in place.
-     ** also permits seller to return deposited amount to an address that sent < 'deposit' tokens to address(this) */
+    /// @notice for a 'seller' to reject any depositing address (including 'buyer') and cause the return of their deposited amount
+    /// @param _depositor: address being rejected by 'seller' which will subsequently be able to withdraw their 'amountDeposited'
+    /// @dev if !openOffer and 'seller' passes 'buyer' to this function, 'buyer' will need to call 'updateBuyer' to choose another address and re-deposit tokens.
     function rejectDepositor(address _depositor) external nonReentrant {
         if (msg.sender != seller) revert TokenLocker_NotSeller();
-        if (!openOffer) revert TokenLocker_OnlyOpenOffer();
-        // reset 'deposited', 'buyerApproved', and 'buyer' variables if 'seller' passed 'buyer' as '_depositor'
+
+        uint256 _amtDeposited = amountDeposited[_depositor];
+        if (_amtDeposited == 0) revert TokenLocker_ZeroAmount();
+
+        delete amountDeposited[_depositor];
+        // regardless of whether '_depositor' is 'buyer', permit them to withdraw their 'amountWithdrawable' balance
+        amountWithdrawable[_depositor] = _amtDeposited;
+
+        // reset 'deposited' and 'buyerApproved' variables if 'seller' passed 'buyer' as '_depositor'
         if (_depositor == buyer) {
             delete deposited;
             delete buyerApproved;
-            delete buyer;
-            emit TokenLocker_BuyerUpdated(address(0));
-        }
-        uint256 _depositAmount = amountDeposited[_depositor];
-        // regardless of whether '_depositor' is 'buyer', if the address has a positive deposited balance, return it to them
-        if (_depositAmount > 0) {
-            delete amountDeposited[_depositor];
-            safeTransfer(tokenContract, _depositor, _depositAmount);
-            emit TokenLocker_DepositedAmountTransferred(
-                _depositor,
-                _depositAmount
-            );
+            // if 'openOffer', delete the 'buyer' variable so the next valid depositor will become 'buyer'
+            // we do not delete 'buyer' if !openOffer, to allow the 'buyer' to choose another address via 'updateBuyer', rather than irreversibly deleting the variable
+            if (openOffer) {
+                delete buyer;
+                emit TokenLocker_BuyerUpdated(address(0));
+            }
         }
     }
 
-    /// @notice check if expired, and if so, handle refundability by token transfers
-    /// @dev if expired, update isExpired boolean and if non-refundable, send deposit to seller before returning balance to buyer. If refundable, send entire balance back to buyer.
+    /// @notice allows an address to withdraw 'amountWithdrawable' of tokens, such as a refundable amount post-expiry or if seller has called 'rejectDepositor' for such an address, etc.
+    /// @dev used by a depositing address which 'seller' passed to 'rejectDepositor()', or if 'isExpired', used by 'buyer' and/or 'seller' (as applicable)
+    function withdraw() external {
+        uint256 _amt = amountWithdrawable[msg.sender];
+        if (_amt == 0) revert TokenLocker_ZeroAmount();
+
+        delete amountWithdrawable[msg.sender];
+        safeTransfer(tokenContract, msg.sender, _amt);
+        emit TokenLocker_DepositedAmountTransferred(msg.sender, _amt);
+    }
+
+    /// @notice check if expired, and if so, handle refundability by updating the 'amountWithdrawable' mapping as applicable
+    /** @dev if expired, update isExpired boolean. If non-refundable, update seller's 'amountWithdrawable' to be the non-refundable deposit amount before updating buyer's mapping for the remainder.
+     *** If refundable, update buyer's 'amountWithdrawable' to the entire balance. */
     /// @return isExpired
     function checkIfExpired() public nonReentrant returns (bool) {
         if (expirationTime <= block.timestamp) {
@@ -586,27 +604,11 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
             delete deposited;
             delete amountDeposited[buyer];
             if (_balance > 0) {
-                // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by a successful 'execute()', send 'seller' the 'deposit' amount before returning the remainder amount (if any) to buyer
+                // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by a successful 'execute()', enable 'seller' to withdraw the 'deposit' amount before enabling the remainder amount (if any) to be withdrawn by buyer
                 if (!refundable && _isDeposited) {
-                    uint256 _remainder = _balance - deposit;
-                    safeTransfer(tokenContract, seller, deposit);
-                    emit TokenLocker_DepositedAmountTransferred(
-                        seller,
-                        deposit
-                    );
-                    if (_remainder > 0)
-                        safeTransfer(tokenContract, buyer, _remainder);
-                    emit TokenLocker_DepositedAmountTransferred(
-                        buyer,
-                        _remainder
-                    );
-                } else {
-                    safeTransfer(tokenContract, buyer, _balance);
-                    emit TokenLocker_DepositedAmountTransferred(
-                        buyer,
-                        _balance
-                    );
-                }
+                    amountWithdrawable[seller] = deposit;
+                    amountWithdrawable[buyer] = _balance - deposit;
+                } else amountWithdrawable[buyer] = _balance;
             }
         }
         return isExpired;
