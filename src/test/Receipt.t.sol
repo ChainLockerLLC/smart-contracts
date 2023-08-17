@@ -92,7 +92,7 @@ contract ReceiptTest is Test {
         assertEq(deployer, receiptTest.admin(), "initial admin != deployer");
     }
 
-    function testUpdateAdmin(address _addr) public {
+    function testUpdateAdmin(address _addr, address _addr2) public {
         bool _reverted;
         // address(this) is calling the test contract so it should be the admin for the call not to revert
         if (address(this) != receiptTest.admin()) {
@@ -100,6 +100,12 @@ contract ReceiptTest is Test {
             vm.expectRevert();
         }
         receiptTest.updateAdmin(_addr);
+        vm.startPrank(_addr2);
+        if (_addr != _addr2) vm.expectRevert();
+        receiptTest.acceptAdminRole();
+        vm.stopPrank();
+        vm.startPrank(_addr);
+        receiptTest.acceptAdminRole();
         if (!_reverted)
             assertEq(
                 receiptTest.admin(),
@@ -140,17 +146,18 @@ contract ReceiptTest is Test {
         uint256 _timestamp,
         int224 _value
     ) public {
+        // assume reasonable numbers
+        vm.assume(_tokenAmount < 2 ^ 100 && _value < 2 ^ 100);
         // deploy a new 18 decimal ERC20 for testing
         testToken = new ERC20();
         address _token = address(testToken);
         value = _value;
         timestamp = _timestamp;
-
+        uint256 _decimals = testToken.decimals();
         // update the proxy mapping for the new '_token' to address(this) so the test read() function is called
         receiptTest.updateProxy(_token, address(this));
         if (
             _tokenAmount == 0 ||
-            _tokenAmount > type(uint32).max ||
             _timestamp > block.timestamp ||
             _timestamp + ONE_DAY < block.timestamp ||
             _value < int224(0)
@@ -158,7 +165,8 @@ contract ReceiptTest is Test {
 
         (uint256 _testId, uint256 _usdValue) = receiptTest.printReceipt(
             _token,
-            _tokenAmount
+            _tokenAmount,
+            _decimals
         );
 
         if (_testId != 0)
