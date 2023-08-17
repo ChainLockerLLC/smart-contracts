@@ -123,19 +123,26 @@ contract ChainLockerFactoryTest is Test {
     }
 
     function testUpdateReceiver(
-        address payable _caller,
-        address payable _newReceiver
+        address payable _addr,
+        address payable _addr2
     ) public {
-        vm.startPrank(_caller);
-        bool _updated;
-        if (_caller != factoryTest.receiver()) vm.expectRevert();
-        else _updated = true;
-        factoryTest.updateReceiver(_newReceiver);
-
-        if (_updated)
+        bool _reverted;
+        // address(this) is calling the test contract so it should be the receiver for the call not to revert
+        if (address(this) != factoryTest.receiver()) {
+            _reverted = true;
+            vm.expectRevert();
+        }
+        factoryTest.updateReceiver(_addr);
+        vm.startPrank(_addr2);
+        if (_addr != _addr2) vm.expectRevert();
+        factoryTest.acceptReceiverRole();
+        vm.stopPrank();
+        vm.startPrank(_addr);
+        factoryTest.acceptReceiverRole();
+        if (!_reverted)
             assertEq(
                 factoryTest.receiver(),
-                _newReceiver,
+                _addr,
                 "receiver address did not update"
             );
     }
