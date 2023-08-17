@@ -60,10 +60,22 @@ contract EthLockerTest is Test {
 
     function testUpdateBuyer(address payable _addr) public {
         vm.startPrank(escrowTest.buyer());
-        if (escrowTest.isExpired()) vm.expectRevert();
+        bool _reverted;
+        uint256 _amtDeposited = escrowTest.amountDeposited(buyer);
+        if (escrowTest.isExpired()) {
+            _reverted = true;
+            vm.expectRevert();
+        }
 
         escrowTest.updateBuyer(_addr);
-        assertEq(escrowTest.buyer(), _addr, "buyer address did not update");
+        if (!_reverted) {
+            assertEq(escrowTest.buyer(), _addr, "buyer address did not update");
+            assertEq(
+                escrowTest.amountDeposited(_addr),
+                _amtDeposited,
+                "amountDeposited mapping did not update"
+            );
+        }
     }
 
     function testReceive(uint256 _amount) public payable {
@@ -129,62 +141,59 @@ contract EthLockerTest is Test {
     }
 
     // fuzz test for different timestamps
-    // balance checks assume no other msg.value transfers during testing
     function testCheckIfExpired(uint256 timestamp) external {
-        // assume 'totalAmount' is in escrow, so escrowTest can transfer 'totalAmount' back to buyer if expired
+        // assume 'totalAmount' is in escrow
         vm.deal(address(escrowTest), escrowTest.totalAmount());
 
-        uint256 _preBalance = address(escrowTest).balance;
-        uint256 _preBuyerBalance = escrowTest.buyer().balance;
-        uint256 _preSellerBalance = escrowTest.seller().balance;
+        uint256 _preBuyerAmtWithdrawable = escrowTest.amountWithdrawable(buyer);
+        uint256 _preSellerAmtWithdrawable = escrowTest.amountWithdrawable(
+            seller
+        );
         bool _preDeposited = escrowTest.deposited();
         vm.warp(timestamp);
         escrowTest.checkIfExpired();
-        // ensure, if timestamp is past expiration time and thus escrow is expired, boolean is updated and totalAmount is returned to buyer
-        // else, isExpired() should be false and escrow's and buyer's balances should be unchanged
+        // ensure, if timestamp is past expiration time and thus escrow is expired, boolean is updated and totalAmount is credited to buyer
+        // else, isExpired() should be false and amountWithdrawable mappings should be unchanged
         if (escrowTest.expirationTime() <= timestamp) {
             assertTrue(escrowTest.isExpired());
-            assertGt(
-                _preBalance,
-                address(escrowTest).balance,
-                "escrow's balance should have been reduced by buyer's deposited amount"
-            );
             if (escrowTest.refundable())
                 assertGt(
-                    escrowTest.buyer().balance,
-                    _preBuyerBalance,
-                    "buyer's balance should have been increased by refunded amount"
+                    escrowTest.amountWithdrawable(buyer),
+                    _preBuyerAmtWithdrawable,
+                    "buyer's amountWithdrawable should have been increased by refunded amount"
                 );
             else if (!escrowTest.refundable() && _preDeposited) {
-                uint256 _remainder = _preBalance - escrowTest.deposit();
+                uint256 _remainder = address(escrowTest).balance -
+                    escrowTest.deposit();
                 assertEq(
-                    escrowTest.seller().balance - _preSellerBalance,
+                    escrowTest.amountWithdrawable(seller) -
+                        _preSellerAmtWithdrawable,
                     escrowTest.deposit(),
-                    "seller's balance should have been increased by non-refundable 'deposit'"
+                    "seller's amountWithdrawable should have been increased by non-refundable 'deposit'"
                 );
                 if (_remainder > 0)
                     assertEq(
-                        escrowTest.buyer().balance,
-                        _preBuyerBalance + _remainder,
-                        "buyer's balance should have been increased by the the remainder (amount over 'deposit')"
+                        escrowTest.amountWithdrawable(buyer),
+                        _preBuyerAmtWithdrawable + _remainder,
+                        "buyer's amountWithdrawable should have been increased by the the remainder (amount over 'deposit')"
                     );
             }
             assertEq(
                 escrowTest.amountDeposited(escrowTest.buyer()),
                 0,
-                "buyer's 'amountDeposited' was not deleted"
+                "buyer's amountDeposited was not deleted"
             );
         } else {
             assertTrue(!escrowTest.isExpired());
             assertEq(
-                _preBalance,
-                address(escrowTest).balance,
-                "escrow's balance should be unchanged"
+                escrowTest.amountWithdrawable(seller),
+                _preSellerAmtWithdrawable,
+                "seller's amountWithdrawable should be unchanged"
             );
             assertEq(
-                escrowTest.buyer().balance,
-                _preBuyerBalance,
-                "buyer's balance should be unchanged"
+                escrowTest.amountWithdrawable(buyer),
+                _preBuyerAmtWithdrawable,
+                "buyer's amountWithdrawable should be unchanged"
             );
         }
     }
@@ -193,16 +202,8 @@ contract EthLockerTest is Test {
         address payable _depositor,
         uint256 _deposit
     ) external {
-        // certain addresses causing unknown foundry error, and '0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496' appears to be a default test contract without a fallback
         // '_deposit' must be less than 'totalAmount', and '_deposit' must be greater than 1e4 wei
-        vm.assume(
-            _depositor != address(0) &&
-                _depositor != address(1) &&
-                _depositor != address(9) &&
-                _depositor != 0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496 &&
-                _deposit < totalAmount &&
-                _deposit > 1e4
-        );
+        vm.assume(_deposit < totalAmount && _deposit > 1e4);
         // deploy openOffer version of EthLocker with no valueCondition
         openEscrowTest = new EthLocker(
             true,
@@ -225,6 +226,9 @@ contract EthLockerTest is Test {
         (bool _success, ) = _newContract.call{value: _deposit}("");
 
         bool _wasDeposited = openEscrowTest.deposited();
+        uint256 _amountWithdrawableBefore = openEscrowTest.amountWithdrawable(
+            _depositor
+        );
         bool _reverted;
         vm.stopPrank();
         // reject depositor as 'seller'
@@ -237,17 +241,53 @@ contract EthLockerTest is Test {
         }
         openEscrowTest.rejectDepositor(_depositor);
         if (!_reverted || _newContract != address(this)) {
-            if (_wasDeposited && _success && _depositor != address(0))
+            if (_wasDeposited && _success && _depositor != address(0)) {
                 assertEq(
                     address(0),
                     openEscrowTest.buyer(),
                     "buyer address did not delete"
                 );
-
+                assertGt(
+                    openEscrowTest.amountWithdrawable(_depositor),
+                    _amountWithdrawableBefore,
+                    "_depositor's amountWithdrawable did not update"
+                );
+            }
             assertEq(
                 0,
                 openEscrowTest.amountDeposited(_depositor),
                 "amountDeposited did not delete"
+            );
+        }
+    }
+
+    function testWithdraw(address _caller) external {
+        uint256 _preBalance = address(escrowTest).balance;
+        uint256 _preAmtWithdrawable = escrowTest.amountWithdrawable(_caller);
+        bool _reverted;
+
+        vm.startPrank(_caller);
+        if (escrowTest.amountWithdrawable(_caller) == 0) {
+            _reverted = true;
+            vm.expectRevert();
+        }
+        escrowTest.withdraw();
+
+        assertEq(
+            escrowTest.amountWithdrawable(_caller),
+            0,
+            "not all of 'amountWithdrawable' was withdrawn"
+        );
+        if (!_reverted) {
+            assertGt(
+                _preBalance,
+                address(escrowTest).balance,
+                "balance of escrowTest not affected"
+            );
+            assertGt(
+                _preAmtWithdrawable,
+                escrowTest.amountWithdrawable(_caller),
+                "amountWithdrawable not affected"
             );
         }
     }
@@ -263,7 +303,6 @@ contract EthLockerTest is Test {
         vm.deal(address(escrowTest), escrowTest.totalAmount());
 
         uint256 _preBalance = address(escrowTest).balance;
-        uint256 _preBuyerBalance = escrowTest.buyer().balance;
         uint256 _preSellerBalance = escrowTest.seller().balance;
         bool _approved;
 
@@ -277,38 +316,36 @@ contract EthLockerTest is Test {
         assertTrue(!escrowTest.sellerApproved());
         assertTrue(!escrowTest.buyerApproved());
 
-        // if both seller and buyer approved closing before the execute() call, proceed
-        if (_approved) {
-            // if the expiration time has been met or surpassed, check the same things as in 'testCheckIfExpired()' and that both approval booleans were deleted
-            // else, seller should have received totalAmount
-            if (escrowTest.isExpired()) {
-                assertGt(
-                    _preBalance,
-                    address(escrowTest).balance,
-                    "escrow's balance should have been reduced by 'totalAmount'"
-                );
-                assertGt(
-                    escrowTest.buyer().balance,
-                    _preBuyerBalance,
-                    "buyer's balance should have been increased by 'totalAmount'"
-                );
-            } else {
-                assertGt(
-                    _preBalance,
-                    address(escrowTest).balance,
-                    "escrow's balance should have been reduced by 'totalAmount'"
-                );
-                assertGt(
-                    escrowTest.seller().balance,
-                    _preSellerBalance,
-                    "seller's balance should have been increased by 'totalAmount'"
-                );
-                assertEq(
-                    address(escrowTest).balance,
-                    0,
-                    "escrow balance should be zero"
-                );
-            }
+        // if both seller and buyer approved closing before the execute() call and expiry hasn't been reached, seller should be paid the totalAmount
+        if (_approved && !escrowTest.isExpired()) {
+            // seller should have received totalAmount
+            assertGt(
+                _preBalance,
+                address(escrowTest).balance,
+                "escrow's balance should have been reduced by 'totalAmount'"
+            );
+            assertGt(
+                escrowTest.seller().balance,
+                _preSellerBalance,
+                "seller's balance should have been increased by 'totalAmount'"
+            );
+            assertEq(
+                address(escrowTest).balance,
+                0,
+                "escrow balance should be zero"
+            );
+        } else if (escrowTest.isExpired()) {
+            //balances should not change if expired
+            assertEq(
+                _preBalance,
+                address(escrowTest).balance,
+                "escrow's balance should not change yet if expired ('amountWithdrawable' mappings will update)"
+            );
+            assertEq(
+                escrowTest.seller().balance,
+                _preSellerBalance,
+                "seller's balance should not change yet if expired ('amountWithdrawable' mappings will update)"
+            );
         }
     }
 
@@ -320,8 +357,9 @@ contract EthLockerTest is Test {
         uint8 _valueCondition
     ) external {
         // a valueCondition that is 1, 2, or 3 and that minValue is not greater than maxValue
-        vm.assume(_valueCondition < 4 && _valueCondition > 0);
-        vm.assume(_minValue <= _maxValue);
+        vm.assume(
+            _valueCondition < 4 && _valueCondition > 0 && _minValue <= _maxValue
+        );
 
         /// feed 'address(this)' as the dataFeedProxy to return the fuzzed value
         conditionEscrowTest = new EthLocker(
@@ -344,10 +382,8 @@ contract EthLockerTest is Test {
         vm.prank(seller);
         conditionEscrowTest.readyToExecute();
         vm.stopPrank();
-        vm.deal(address(this), totalAmount);
+        vm.deal(address(conditionEscrowTest), totalAmount);
 
-        uint256 _preBalance = address(conditionEscrowTest).balance;
-        uint256 _preBuyerBalance = conditionEscrowTest.buyer().balance;
         uint256 _preSellerBalance = conditionEscrowTest.seller().balance;
         bool _approved;
 
@@ -363,33 +399,36 @@ contract EthLockerTest is Test {
 
         conditionEscrowTest.execute();
 
-        // if both seller and buyer approved closing before the execute() call, proceed
-        if (_approved) {
-            // if the expiration time has been met or surpassed, check the same things as in 'testCheckIfExpired()' and that both approval booleans were deleted
-            // else, seller should have received totalAmount
-            if (conditionEscrowTest.isExpired()) {
-                assertGt(
-                    _preBalance,
-                    address(conditionEscrowTest).balance,
-                    "escrow's balance should have been reduced by 'totalAmount'"
-                );
-                assertGt(
-                    conditionEscrowTest.buyer().balance,
-                    _preBuyerBalance,
-                    "buyer's balance should have been increased by 'totalAmount'"
-                );
-            } else {
-                assertGt(
-                    _preBalance,
-                    address(conditionEscrowTest).balance,
-                    "escrow's balance should have been reduced by 'totalAmount'"
-                );
-                assertGt(
-                    conditionEscrowTest.seller().balance,
-                    _preSellerBalance,
-                    "seller's balance should have been increased by 'totalAmount'"
-                );
-            }
+        // if both seller and buyer approved closing before the execute() call and expiry hasn't been reached, seller should be paid the totalAmount
+        if (_approved && !conditionEscrowTest.isExpired()) {
+            // seller should have received totalAmount
+            assertGt(
+                totalAmount,
+                address(conditionEscrowTest).balance,
+                "escrow's balance should have been reduced by 'totalAmount'"
+            );
+            assertGt(
+                conditionEscrowTest.seller().balance,
+                _preSellerBalance,
+                "seller's balance should have been increased by 'totalAmount'"
+            );
+            assertEq(
+                address(conditionEscrowTest).balance,
+                0,
+                "escrow balance should be zero"
+            );
+        } else if (conditionEscrowTest.isExpired()) {
+            //balances should not change if expired
+            assertEq(
+                totalAmount,
+                address(conditionEscrowTest).balance,
+                "escrow's balance should not change yet if expired ('amountWithdrawable' mappings will update)"
+            );
+            assertEq(
+                conditionEscrowTest.seller().balance,
+                _preSellerBalance,
+                "seller's balance should not change yet if expired ('amountWithdrawable' mappings will update)"
+            );
         }
     }
 
