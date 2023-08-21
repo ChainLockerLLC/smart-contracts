@@ -274,8 +274,8 @@ contract TokenLockerTest is Test {
     TokenLocker internal conditionEscrowTest;
     SigUtils internal sigUtils;
 
-    address payable internal buyer;
-    address payable internal seller = payable(address(222222));
+    address internal buyer;
+    address internal seller = address(222222);
     address escrowTestAddr;
     address testTokenAddr;
     // for testConditionExecute, returned in mock read() function
@@ -293,7 +293,7 @@ contract TokenLockerTest is Test {
         // initialize EIP712 variables
         sigUtils = new SigUtils(testToken.domainSeparator());
         ownerPrivateKey = 0xA11CE;
-        buyer = payable(vm.addr(ownerPrivateKey));
+        buyer = vm.addr(ownerPrivateKey);
         escrowTest = new TokenLocker(
             true,
             false,
@@ -322,7 +322,7 @@ contract TokenLockerTest is Test {
         );
     }
 
-    function testUpdateSeller(address payable _addr) public {
+    function testUpdateSeller(address _addr) public {
         vm.startPrank(escrowTest.seller());
         if (escrowTest.isExpired()) vm.expectRevert();
 
@@ -330,12 +330,24 @@ contract TokenLockerTest is Test {
         assertEq(escrowTest.seller(), _addr, "seller address did not update");
     }
 
-    function testUpdateBuyer(address payable _addr) public {
+    function testUpdateBuyer(address _addr) public {
         vm.startPrank(escrowTest.buyer());
-        if (escrowTest.isExpired()) vm.expectRevert();
-
+        bool _reverted;
+        uint256 _amtDeposited = escrowTest.amountDeposited(buyer);
+        if (escrowTest.isExpired()) {
+            _reverted = true;
+            vm.expectRevert();
+        }
         escrowTest.updateBuyer(_addr);
-        assertEq(escrowTest.buyer(), _addr, "buyer address did not update");
+
+        if (!_reverted) {
+            assertEq(escrowTest.buyer(), _addr, "buyer address did not update");
+            assertEq(
+                escrowTest.amountDeposited(_addr),
+                _amtDeposited,
+                "amountDeposited mapping did not update"
+            );
+        }
     }
 
     function testDepositTokensWithPermit(
@@ -361,6 +373,7 @@ contract TokenLockerTest is Test {
         vm.prank(buyer);
         if (
             _amount > totalAmount ||
+            (escrowTest.openOffer() && _amount < totalAmount) ||
             escrowTest.expirationTime() <= block.timestamp ||
             _deadline < block.timestamp
         ) {
@@ -398,7 +411,7 @@ contract TokenLockerTest is Test {
                 );
             if (escrowTest.openOffer())
                 assertTrue(
-                    escrowTest.buyer() == payable(msg.sender),
+                    escrowTest.buyer() == msg.sender,
                     "buyer variable did not update"
                 );
         }
@@ -411,16 +424,17 @@ contract TokenLockerTest is Test {
         uint256 _beforeAmountDeposited = escrowTest.amountDeposited(buyer);
         uint256 _beforeBalance = testToken.balanceOf(escrowTestAddr);
 
-        vm.prank(buyer);
+        vm.startPrank(buyer);
         testToken.approve(escrowTestAddr, _amount);
         if (
             _amount + testToken.balanceOf(address(this)) > totalAmount ||
+            (escrowTest.openOffer() && _amount < totalAmount) ||
             escrowTest.expirationTime() <= block.timestamp
         ) {
             _reverted = true;
             vm.expectRevert();
         }
-        escrowTest.depositTokens(buyer, _amount);
+        escrowTest.depositTokens(_amount);
         uint256 _afterBalance = testToken.balanceOf(escrowTestAddr);
         if (_amount > 0 && !_reverted) {
             uint256 _afterAmountDeposited = escrowTest.amountDeposited(buyer);
@@ -478,78 +492,69 @@ contract TokenLockerTest is Test {
     }
 
     // fuzz test for different timestamps
-    // balance checks assume no other token transfers during testing
     function testCheckIfExpired(uint256 timestamp) external {
-        // assume 'totalAmount' is in escrow, so escrowTest can transfer 'totalAmount' back to buyer if expired
-        testToken.mintToken(escrowTestAddr, totalAmount);
+        // assume 'totalAmount' is in escrow
+        testToken.mintToken(address(escrowTest), escrowTest.totalAmount());
 
-        uint256 _preBalance = testToken.balanceOf(escrowTestAddr);
-        uint256 _preBuyerBalance = testToken.balanceOf(buyer);
-        uint256 _preSellerBalance = testToken.balanceOf(seller);
+        uint256 _preBuyerAmtWithdrawable = escrowTest.amountWithdrawable(buyer);
+        uint256 _preSellerAmtWithdrawable = escrowTest.amountWithdrawable(
+            seller
+        );
         bool _preDeposited = escrowTest.deposited();
         vm.warp(timestamp);
         escrowTest.checkIfExpired();
-        // ensure, if timestamp is past expiration time and thus escrow is expired, boolean is updated and totalAmount is returned to buyer
-        // else, isExpired() should be false and escrow's and buyer's balances should be unchanged
+        // ensure, if timestamp is past expiration time and thus escrow is expired, boolean is updated and totalAmount is credited to buyer
+        // else, isExpired() should be false and amountWithdrawable mappings should be unchanged
         if (escrowTest.expirationTime() <= timestamp) {
             assertTrue(escrowTest.isExpired());
-            assertGt(
-                _preBalance,
-                testToken.balanceOf(escrowTestAddr),
-                "escrow's balance should have been reduced by buyer's deposited amount"
-            );
             if (escrowTest.refundable())
                 assertGt(
-                    testToken.balanceOf(buyer),
-                    _preBuyerBalance,
-                    "buyer's balance should have been increased by refunded amount"
+                    escrowTest.amountWithdrawable(buyer),
+                    _preBuyerAmtWithdrawable,
+                    "buyer's amountWithdrawable should have been increased by refunded amount"
                 );
             else if (!escrowTest.refundable() && _preDeposited) {
-                uint256 _remainder = _preBalance - escrowTest.deposit();
+                uint256 _remainder = address(escrowTest).balance -
+                    escrowTest.deposit();
                 assertEq(
-                    testToken.balanceOf(seller) - _preSellerBalance,
+                    escrowTest.amountWithdrawable(seller) -
+                        _preSellerAmtWithdrawable,
                     escrowTest.deposit(),
-                    "seller's balance should have been increased by non-refundable 'deposit'"
+                    "seller's amountWithdrawable should have been increased by non-refundable 'deposit'"
                 );
                 if (_remainder > 0)
                     assertEq(
-                        testToken.balanceOf(buyer),
-                        _preBuyerBalance + _remainder,
-                        "buyer's balance should have been increased by the the remainder (amount over 'deposit')"
+                        escrowTest.amountWithdrawable(buyer),
+                        _preBuyerAmtWithdrawable + _remainder,
+                        "buyer's amountWithdrawable should have been increased by the the remainder (amount over 'deposit')"
                     );
             }
             assertEq(
                 escrowTest.amountDeposited(escrowTest.buyer()),
                 0,
-                "buyer's 'amountDeposited' was not deleted"
+                "buyer's amountDeposited was not deleted"
             );
         } else {
             assertTrue(!escrowTest.isExpired());
             assertEq(
-                _preBalance,
-                testToken.balanceOf(escrowTestAddr),
-                "escrow's balance should be unchanged"
+                escrowTest.amountWithdrawable(seller),
+                _preSellerAmtWithdrawable,
+                "seller's amountWithdrawable should be unchanged"
             );
             assertEq(
-                testToken.balanceOf(buyer),
-                _preBuyerBalance,
-                "buyer's balance should be unchanged"
+                escrowTest.amountWithdrawable(buyer),
+                _preBuyerAmtWithdrawable,
+                "buyer's amountWithdrawable should be unchanged"
             );
         }
     }
 
     function testRejectDepositor(
-        address payable _depositor,
+        address _depositor,
         uint256 _deposit
     ) external {
-        // certain low numbers cast to address cannot be a depositor because of precompile issues, '_deposit' must be less than 'totalAmount', and '_deposit' must be greater than 1e4 wei
-        vm.assume(
-            _depositor != address(0) &&
-                _depositor != address(1) &&
-                _depositor != address(9) &&
-                _deposit < totalAmount &&
-                _deposit > 1e4
-        );
+        // '_deposit' must be greater than 1e4 wei and not greater than 'totalAmount'
+        vm.assume(_deposit > 1e4 && _deposit <= totalAmount);
         // deploy openOffer version of TokenLocker with no valueCondition
         openEscrowTest = new TokenLocker(
             true,
@@ -565,16 +570,26 @@ contract TokenLockerTest is Test {
             testTokenAddr,
             address(0)
         );
-        address openEscrowTestAddr = address(openEscrowTest);
+        address _newContract = address(openEscrowTest);
+        bool _reverted;
 
         // give the '_deposit' amount to the '_depositor' so they can accept the open offer by calling 'depositTokens'
         testToken.mintToken(_depositor, _deposit);
         vm.startPrank(_depositor);
-        testToken.approve(openEscrowTestAddr, _deposit);
-        openEscrowTest.depositTokens(_depositor, _deposit);
+        testToken.approve(_newContract, _deposit);
+        if (
+            _deposit + testToken.balanceOf(_newContract) > totalAmount ||
+            (openEscrowTest.openOffer() && _deposit < totalAmount)
+        ) {
+            _reverted = true;
+            vm.expectRevert();
+        }
+        openEscrowTest.depositTokens(_deposit);
 
         bool _wasDeposited = openEscrowTest.deposited();
-        bool _reverted;
+        uint256 _amountWithdrawableBefore = openEscrowTest.amountWithdrawable(
+            _depositor
+        );
         vm.stopPrank();
         // reject depositor as 'seller'
         vm.startPrank(seller);
@@ -583,18 +598,54 @@ contract TokenLockerTest is Test {
             vm.expectRevert();
         }
         openEscrowTest.rejectDepositor(_depositor);
-        if (!_reverted) {
-            if (_wasDeposited && _depositor != address(0))
+        if (!_reverted || _newContract != address(this)) {
+            if (_wasDeposited && _depositor != address(0)) {
                 assertEq(
                     address(0),
                     openEscrowTest.buyer(),
                     "buyer address did not delete"
                 );
-
+                assertGt(
+                    openEscrowTest.amountWithdrawable(_depositor),
+                    _amountWithdrawableBefore,
+                    "_depositor's amountWithdrawable did not update"
+                );
+            }
             assertEq(
                 0,
                 openEscrowTest.amountDeposited(_depositor),
                 "amountDeposited did not delete"
+            );
+        }
+    }
+
+    function testWithdraw(address _caller) external {
+        uint256 _preBalance = testToken.balanceOf(escrowTestAddr);
+        uint256 _preAmtWithdrawable = escrowTest.amountWithdrawable(_caller);
+        bool _reverted;
+
+        vm.startPrank(_caller);
+        if (escrowTest.amountWithdrawable(_caller) == 0) {
+            _reverted = true;
+            vm.expectRevert();
+        }
+        escrowTest.withdraw();
+
+        assertEq(
+            escrowTest.amountWithdrawable(_caller),
+            0,
+            "not all of 'amountWithdrawable' was withdrawn"
+        );
+        if (!_reverted) {
+            assertGt(
+                _preBalance,
+                testToken.balanceOf(escrowTestAddr),
+                "balance of escrowTest not affected"
+            );
+            assertGt(
+                _preAmtWithdrawable,
+                escrowTest.amountWithdrawable(_caller),
+                "amountWithdrawable not affected"
             );
         }
     }
