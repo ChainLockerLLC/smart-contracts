@@ -18,6 +18,7 @@ contract EthLockerTest is Test {
 
     address payable internal buyer = payable(address(111111));
     address payable internal seller = payable(address(222222));
+    address escrowTestAddr;
     uint256 internal deployTime;
     uint256 internal deposit = 1e14;
     uint256 internal totalAmount = 1e16;
@@ -38,6 +39,7 @@ contract EthLockerTest is Test {
             buyer,
             address(0)
         );
+        escrowTestAddr = address(escrowTest);
         deployTime = block.timestamp;
         vm.deal(address(this), totalAmount);
     }
@@ -89,7 +91,7 @@ contract EthLockerTest is Test {
             _amount > totalAmount ||
             escrowTest.expirationTime() <= block.timestamp
         ) vm.expectRevert();
-        (_success, ) = address(escrowTest).call{value: _amount}("");
+        (_success, ) = escrowTestAddr.call{value: _amount}("");
         if (
             _amount > escrowTest.deposit() &&
             _amount <= escrowTest.totalAmount() &&
@@ -143,7 +145,7 @@ contract EthLockerTest is Test {
     // fuzz test for different timestamps
     function testCheckIfExpired(uint256 timestamp) external {
         // assume 'totalAmount' is in escrow
-        vm.deal(address(escrowTest), escrowTest.totalAmount());
+        vm.deal(escrowTestAddr, escrowTest.totalAmount());
 
         uint256 _preBuyerAmtWithdrawable = escrowTest.amountWithdrawable(buyer);
         uint256 _preSellerAmtWithdrawable = escrowTest.amountWithdrawable(
@@ -163,7 +165,7 @@ contract EthLockerTest is Test {
                     "buyer's amountWithdrawable should have been increased by refunded amount"
                 );
             else if (!escrowTest.refundable() && _preDeposited) {
-                uint256 _remainder = address(escrowTest).balance -
+                uint256 _remainder = escrowTestAddr.balance -
                     escrowTest.deposit();
                 assertEq(
                     escrowTest.amountWithdrawable(seller) -
@@ -203,7 +205,7 @@ contract EthLockerTest is Test {
         uint256 _deposit
     ) external {
         // '_deposit' must be less than 'totalAmount', and '_deposit' must be greater than 1e4 wei
-        vm.assume(_deposit < totalAmount && _deposit > 1e4);
+        vm.assume(_deposit <= totalAmount && _deposit > 1e4);
         // deploy openOffer version of EthLocker with no valueCondition
         openEscrowTest = new EthLocker(
             true,
@@ -219,17 +221,24 @@ contract EthLockerTest is Test {
             address(0)
         );
         address payable _newContract = payable(address(openEscrowTest));
+        bool _reverted;
         vm.assume(_newContract != _depositor);
         // give the '_deposit' amount to the '_depositor' so they can accept the open offer
         vm.deal(_depositor, _deposit);
         vm.startPrank(_depositor);
+        if (
+            _deposit + _newContract.balance > totalAmount ||
+            (openEscrowTest.openOffer() && _deposit < totalAmount)
+        ) {
+            _reverted = true;
+            vm.expectRevert();
+        }
         (bool _success, ) = _newContract.call{value: _deposit}("");
 
         bool _wasDeposited = openEscrowTest.deposited();
         uint256 _amountWithdrawableBefore = openEscrowTest.amountWithdrawable(
             _depositor
         );
-        bool _reverted;
         vm.stopPrank();
         // reject depositor as 'seller'
         vm.startPrank(seller);
@@ -262,7 +271,7 @@ contract EthLockerTest is Test {
     }
 
     function testWithdraw(address _caller) external {
-        uint256 _preBalance = address(escrowTest).balance;
+        uint256 _preBalance = escrowTestAddr.balance;
         uint256 _preAmtWithdrawable = escrowTest.amountWithdrawable(_caller);
         bool _reverted;
 
@@ -281,7 +290,7 @@ contract EthLockerTest is Test {
         if (!_reverted) {
             assertGt(
                 _preBalance,
-                address(escrowTest).balance,
+                escrowTestAddr.balance,
                 "balance of escrowTest not affected"
             );
             assertGt(
@@ -294,15 +303,15 @@ contract EthLockerTest is Test {
 
     function testExecute() external {
         // if 'totalAmount' isn't in escrow, expect revert
-        if (address(escrowTest).balance != escrowTest.totalAmount()) {
+        if (escrowTestAddr.balance != escrowTest.totalAmount()) {
             vm.expectRevert();
             escrowTest.execute();
         }
 
         // deal 'totalAmount' in escrow, otherwise sellerApproval() will be false (which is captured by this test anyway)
-        vm.deal(address(escrowTest), escrowTest.totalAmount());
+        vm.deal(escrowTestAddr, escrowTest.totalAmount());
 
-        uint256 _preBalance = address(escrowTest).balance;
+        uint256 _preBalance = escrowTestAddr.balance;
         uint256 _preSellerBalance = escrowTest.seller().balance;
         bool _approved;
 
@@ -321,7 +330,7 @@ contract EthLockerTest is Test {
             // seller should have received totalAmount
             assertGt(
                 _preBalance,
-                address(escrowTest).balance,
+                escrowTestAddr.balance,
                 "escrow's balance should have been reduced by 'totalAmount'"
             );
             assertGt(
@@ -330,7 +339,7 @@ contract EthLockerTest is Test {
                 "seller's balance should have been increased by 'totalAmount'"
             );
             assertEq(
-                address(escrowTest).balance,
+                escrowTestAddr.balance,
                 0,
                 "escrow balance should be zero"
             );
@@ -338,7 +347,7 @@ contract EthLockerTest is Test {
             //balances should not change if expired
             assertEq(
                 _preBalance,
-                address(escrowTest).balance,
+                escrowTestAddr.balance,
                 "escrow's balance should not change yet if expired ('amountWithdrawable' mappings will update)"
             );
             assertEq(
