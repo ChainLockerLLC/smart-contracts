@@ -465,7 +465,7 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
 
         // transfer 'amountDeposited[buyer]' to the new '_buyer', delete the existing buyer's 'amountDeposited', and update the 'buyer' state variable
         if (!checkIfExpired()) {
-            amountDeposited[_buyer] = amountDeposited[buyer];
+            amountDeposited[_buyer] += amountDeposited[buyer];
             delete amountDeposited[buyer];
 
             buyer = _buyer;
@@ -563,7 +563,7 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
 
         delete amountDeposited[_depositor];
         // regardless of whether '_depositor' is 'buyer', permit them to withdraw their 'amountWithdrawable' balance
-        amountWithdrawable[_depositor] = _amtDeposited;
+        amountWithdrawable[_depositor] += _amtDeposited;
 
         // reset 'deposited' and 'buyerApproved' variables if 'seller' passed 'buyer' as '_depositor'
         if (_depositor == buyer) {
