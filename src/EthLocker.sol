@@ -131,6 +131,8 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
     bool public sellerApproved;
     address payable public buyer;
     address payable public seller;
+    /// @notice aggregate pending withdrawable amount, so address(this) balance checks subtract withdrawable, but not yet withdrawn, amounts
+    uint256 public pendingWithdraw;
 
     mapping(address => uint256) public amountDeposited;
     mapping(address => uint256) public amountWithdrawable;
@@ -267,12 +269,13 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
      ** also updates 'buyer' to msg.sender if true 'openOffer' and false 'deposited' (msg.sender must send 'totalAmount' to accept an openOffer), and
      ** records amount deposited by msg.sender in case of refundability or where 'seller' rejects a 'buyer' and buyer's deposited amount is to be returned  */
     receive() external payable {
-        if (address(this).balance > totalAmount)
+        uint256 _lockedBalance = address(this).balance - pendingWithdraw;
+        if (_lockedBalance > totalAmount)
             revert EthLocker_BalanceExceedsTotalAmount();
         if (expirationTime <= block.timestamp) revert EthLocker_IsExpired();
-        if (openOffer && address(this).balance < totalAmount)
+        if (openOffer && _lockedBalance < totalAmount)
             revert EthLocker_MustDepositTotalAmount();
-        if (address(this).balance >= deposit && !deposited) {
+        if (_lockedBalance >= deposit && !deposited) {
             // if this EthLocker is an open offer and was not yet accepted (thus '!deposited'), make depositing address the 'buyer' and update 'deposited' to true
             if (openOffer) {
                 buyer = payable(msg.sender);
@@ -281,8 +284,7 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
             deposited = true;
             emit EthLocker_DepositInEscrow(msg.sender);
         }
-        if (address(this).balance == totalAmount)
-            emit EthLocker_TotalAmountInEscrow();
+        if (_lockedBalance == totalAmount) emit EthLocker_TotalAmountInEscrow();
         amountDeposited[msg.sender] += msg.value;
         emit EthLocker_AmountReceived(msg.value);
     }
@@ -315,7 +317,7 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
 
     /// @notice seller and buyer each call this when ready to execute the ChainLocker; other address callers will have no effect
     /// @dev no need for an address(this).balance check because (1) a reasonable seller will only pass 'true'
-    /// if 'totalAmount' is in place, and (2) 'execute()' requires address(this).balance >= 'totalAmount'
+    /// if 'totalAmount' is in place, and (2) 'execute()' requires the locked balance >= 'totalAmount'
     /// separate conditionals in case 'buyer' == 'seller'
     function readyToExecute() external {
         if (msg.sender == seller) {
@@ -333,11 +335,9 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
     /** @dev requires entire 'totalAmount' be held by address(this). If properly executes, pays seller and emits event with effective time of execution.
      *** Does not require amountDeposited[buyer] == address(this).balance to allow buyer to deposit from multiple addresses if desired */
     function execute() external {
-        if (
-            !sellerApproved ||
-            !buyerApproved ||
-            address(this).balance < totalAmount
-        ) revert EthLocker_NotReadyToExecute();
+        uint256 _lockedBalance = address(this).balance - pendingWithdraw;
+        if (!sellerApproved || !buyerApproved || _lockedBalance < totalAmount)
+            revert EthLocker_NotReadyToExecute();
         int224 _value;
 
         // delete approvals
@@ -367,7 +367,7 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
         if (!checkIfExpired()) {
             delete deposited;
             delete amountDeposited[buyer];
-            // safeTransfer 'totalAmount' to 'seller' since 'receive()' prevents depositing more than the totalAmount, and safeguarded by any excess balance being returned to buyer after expiry in 'checkIfExpired()'
+            // safeTransfer 'totalAmount' to 'seller' since 'receive()' prevents depositing more than the totalAmount, and safeguarded by any excess balance being withdrawable by buyer after expiry in 'checkIfExpired()'
             safeTransferETH(seller, totalAmount);
 
             // effective time of execution is block.timestamp upon payment to seller
@@ -401,6 +401,8 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
         delete amountDeposited[_depositor];
         // regardless of whether '_depositor' is 'buyer', permit them to withdraw their 'amountWithdrawable' balance
         amountWithdrawable[_depositor] += _amtDeposited;
+        // update the aggregate withdrawable balance counter
+        pendingWithdraw += _amtDeposited;
 
         // reset 'deposited' and 'buyerApproved' variables if 'seller' passed 'buyer' as '_depositor'
         if (_depositor == buyer) {
@@ -422,6 +424,8 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
         if (_amt == 0) revert EthLocker_ZeroAmount();
 
         delete amountWithdrawable[msg.sender];
+        // update the aggregate withdrawable balance counter
+        pendingWithdraw -= _amt;
 
         safeTransferETH(payable(msg.sender), _amt);
         emit EthLocker_DepositedAmountTransferred(msg.sender, _amt);
@@ -434,13 +438,15 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
     function checkIfExpired() public nonReentrant returns (bool) {
         if (expirationTime <= block.timestamp) {
             isExpired = true;
-            uint256 _balance = address(this).balance;
+            uint256 _balance = address(this).balance - pendingWithdraw;
             bool _isDeposited = deposited;
 
             emit EthLocker_Expired();
 
             delete deposited;
             delete amountDeposited[buyer];
+            // update the aggregate withdrawable balance counter
+            pendingWithdraw += _balance;
 
             if (_balance > 0) {
                 // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by a successful 'execute()', enable 'seller' to withdraw the 'deposit' amount before enabling the remainder amount (if any) to be withdrawn by buyer
