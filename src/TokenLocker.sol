@@ -220,6 +220,8 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
     bool public isExpired;
     bool public buyerApproved;
     bool public sellerApproved;
+    /// @notice aggregate pending withdrawable amount, so address(this) balance checks subtract withdrawable, but not yet withdrawn, amounts
+    uint256 public pendingWithdraw;
 
     mapping(address => uint256) public amountDeposited;
     mapping(address => uint256) public amountWithdrawable;
@@ -388,7 +390,9 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
         bytes32 r,
         bytes32 s
     ) external nonReentrant {
-        uint256 _balance = erc20.balanceOf(address(this)) + _amount;
+        uint256 _balance = erc20.balanceOf(address(this)) +
+            _amount -
+            pendingWithdraw;
         if (_balance > totalAmount)
             revert TokenLocker_BalanceExceedsTotalAmount();
         if (!openOffer && _depositor != buyer) revert TokenLocker_NotBuyer();
@@ -421,7 +425,9 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
      ** records amount deposited by msg.sender in case of refundability or where 'seller' rejects a 'buyer' and buyer's deposited amount is to be returned  */
     /// @param _amount: amount of tokens deposited. If 'openOffer', '_amount' must == 'totalAmount'
     function depositTokens(uint256 _amount) external nonReentrant {
-        uint256 _balance = erc20.balanceOf(address(this)) + _amount;
+        uint256 _balance = erc20.balanceOf(address(this)) +
+            _amount -
+            pendingWithdraw;
         if (_balance > totalAmount)
             revert TokenLocker_BalanceExceedsTotalAmount();
         if (!openOffer && msg.sender != buyer) revert TokenLocker_NotBuyer();
@@ -475,7 +481,7 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
 
     /// @notice seller and buyer each call this when ready to execute; other address callers will have no effect
     /** @dev no need for an erc20.balanceOf(address(this)) check because (1) a reasonable seller will only pass 'true'
-     *** if 'totalAmount' is in place, and (2) 'execute()' requires erc20.balanceOf(address(this)) >= 'totalAmount';
+     *** if 'totalAmount' is in place, and (2) 'execute()' requires erc20.balanceOf(address(this)) - 'pendingWithdraw' >= 'totalAmount';
      *** separate conditionals in case 'buyer' == 'seller' */
     function readyToExecute() external {
         if (msg.sender == seller) {
@@ -491,12 +497,12 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
     /** @notice checks if both buyer and seller are ready to execute, and that any applicable 'ValueCondition' is met, and expiration has not been met;
      *** if so, this contract executes and pays seller; if not, totalAmount deposit returned to buyer (if refundable); callable by any external address **/
     /** @dev requires entire 'totalAmount' be held by address(this). If properly executes, pays seller and emits event with effective time of execution.
-     *** Does not require amountDeposited[buyer] == erc20.balanceOf(address(this)) to allow buyer to deposit from multiple addresses if desired; */
+     *** Does not require amountDeposited[buyer] == erc20.balanceOf(address(this)) - pendingWithdraw to allow buyer to deposit from multiple addresses if desired; */
     function execute() external {
         if (
             !sellerApproved ||
             !buyerApproved ||
-            erc20.balanceOf(address(this)) < totalAmount
+            erc20.balanceOf(address(this)) - pendingWithdraw < totalAmount
         ) revert TokenLocker_NotReadyToExecute();
 
         // delete approvals
@@ -529,7 +535,7 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
             delete amountDeposited[buyer];
 
             // safeTransfer 'totalAmount' to 'seller'; note the deposit functions perform checks against depositing more than the 'totalAmount',
-            // and further safeguarded by any excess balance being returned to buyer after expiry in 'checkIfExpired()'
+            // and further safeguarded by any excess balance being withdrawable by buyer after expiry in 'checkIfExpired()'
             safeTransfer(tokenContract, seller, totalAmount);
 
             // effective time of execution is block.timestamp upon payment to seller
@@ -564,6 +570,8 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
         delete amountDeposited[_depositor];
         // regardless of whether '_depositor' is 'buyer', permit them to withdraw their 'amountWithdrawable' balance
         amountWithdrawable[_depositor] += _amtDeposited;
+        // update the aggregate withdrawable balance counter
+        pendingWithdraw += _amtDeposited;
 
         // reset 'deposited' and 'buyerApproved' variables if 'seller' passed 'buyer' as '_depositor'
         if (_depositor == buyer) {
@@ -585,6 +593,9 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
         if (_amt == 0) revert TokenLocker_ZeroAmount();
 
         delete amountWithdrawable[msg.sender];
+        // update the aggregate withdrawable balance counter
+        pendingWithdraw -= _amt;
+
         safeTransfer(tokenContract, msg.sender, _amt);
         emit TokenLocker_DepositedAmountTransferred(msg.sender, _amt);
     }
@@ -596,15 +607,19 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
     function checkIfExpired() public nonReentrant returns (bool) {
         if (expirationTime <= block.timestamp) {
             isExpired = true;
-            uint256 _balance = erc20.balanceOf(address(this));
+            uint256 _balance = erc20.balanceOf(address(this)) - pendingWithdraw;
             bool _isDeposited = deposited;
 
             emit TokenLocker_Expired();
 
             delete deposited;
             delete amountDeposited[buyer];
+            // update the aggregate withdrawable balance counter
+            pendingWithdraw += _balance;
+
             if (_balance > 0) {
-                // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by a successful 'execute()', enable 'seller' to withdraw the 'deposit' amount before enabling the remainder amount (if any) to be withdrawn by buyer
+                // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by
+                // a successful 'execute()', enable 'seller' to withdraw the 'deposit' amount before enabling the remainder amount (if any) to be withdrawn by buyer
                 if (!refundable && _isDeposited) {
                     amountWithdrawable[seller] = deposit;
                     amountWithdrawable[buyer] = _balance - deposit;
