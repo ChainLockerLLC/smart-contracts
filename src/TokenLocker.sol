@@ -167,9 +167,9 @@ abstract contract ReentrancyGuard {
  * optional value condition for execution (contingent execution based on oracle-fed external data value)
  * buyer and seller addresses replaceable by applicable party
  **/
-/** @dev executes and releases 'totalAmount' to 'seller' iff:
+/** @dev optimize with >= 200 runs. contract executes and releases 'totalAmount' to 'seller' iff:
  * (1) 'buyer' and 'seller' have both called 'readyToExecute()'
- * (2) balanceOf(address(this)) >= 'totalAmount'
+ * (2) erc20.balanceOf(address(this)) - 'pendingWithdraw' >= 'totalAmount'
  * (3) 'expirationTime' > block.timestamp
  * (4) if there is a valueCondition, such condition is satisfied
  *
@@ -614,8 +614,10 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
 
             delete deposited;
             delete amountDeposited[buyer];
-            // update the aggregate withdrawable balance counter
-            pendingWithdraw += _balance;
+            // update the aggregate withdrawable balance counter. Cannot overflow even if erc20.balanceOf(address(this)) == type(uint256).max because 'pendingWithdraw' is subtracted in the calculation of '_balance' above
+            unchecked {
+                pendingWithdraw += _balance;
+            }
 
             if (_balance > 0) {
                 // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by
