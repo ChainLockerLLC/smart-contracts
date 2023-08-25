@@ -82,7 +82,7 @@ abstract contract ReentrancyGuard {
  **/
 /** @dev executes and releases 'totalAmount' to 'seller' iff:
  * (1) 'buyer' and 'seller' have both called 'readyToExecute()'
- * (2) address(this).balance >= 'totalAmount'
+ * (2) address(this).balance - 'pendingWithdraw' >= 'totalAmount'
  * (3) 'expirationTime' > block.timestamp
  * (4) if there is a valueCondition, such condition is satisfied
  *
@@ -445,8 +445,10 @@ contract EthLocker is ReentrancyGuard, SafeTransferLib {
 
             delete deposited;
             delete amountDeposited[buyer];
-            // update the aggregate withdrawable balance counter
-            pendingWithdraw += _balance;
+            // update the aggregate withdrawable balance counter. Cannot overflow even if address(this).balance == type(uint256).max because 'pendingWithdraw' is subtracted in the calculation of '_balance' above
+            unchecked {
+                pendingWithdraw += _balance;
+            }
 
             if (_balance > 0) {
                 // if non-refundable deposit and 'deposit' hasn't been reset to 'false' by a successful 'execute()', enable 'seller' to withdraw the 'deposit' amount before enabling the remainder amount (if any) to be withdrawn by buyer
