@@ -271,6 +271,7 @@ contract EthLockerTest is Test {
     }
 
     function testWithdraw(address _caller) external {
+        // since we're testing only the difference in the amountWithdrawable for '_caller', no need to mock the aggregate 'pendingWithdraw'
         uint256 _preBalance = escrowTestAddr.balance;
         uint256 _preAmtWithdrawable = escrowTest.amountWithdrawable(_caller);
         bool _reverted;
@@ -302,8 +303,12 @@ contract EthLockerTest is Test {
     }
 
     function testExecute() external {
-        // if 'totalAmount' isn't in escrow, expect revert
-        if (escrowTestAddr.balance != escrowTest.totalAmount()) {
+        // if 'totalAmount' (accounting for any amounts withdrawable) isn't in escrow, expect revert
+        // we just subtract buyer and seller's amountWithdrawable, if any (rather than mocking 'pendingWithdraw') since this is !openOffer
+        uint256 _preBalance = escrowTestAddr.balance -
+            (escrowTest.amountWithdrawable(buyer) +
+                escrowTest.amountWithdrawable(seller));
+        if (_preBalance != escrowTest.totalAmount()) {
             vm.expectRevert();
             escrowTest.execute();
         }
@@ -311,7 +316,6 @@ contract EthLockerTest is Test {
         // deal 'totalAmount' in escrow, otherwise sellerApproval() will be false (which is captured by this test anyway)
         vm.deal(escrowTestAddr, escrowTest.totalAmount());
 
-        uint256 _preBalance = escrowTestAddr.balance;
         uint256 _preSellerBalance = escrowTest.seller().balance;
         bool _approved;
 
@@ -325,12 +329,16 @@ contract EthLockerTest is Test {
         assertTrue(!escrowTest.sellerApproved());
         assertTrue(!escrowTest.buyerApproved());
 
+        uint256 _postBalance = escrowTestAddr.balance -
+            (escrowTest.amountWithdrawable(buyer) +
+                escrowTest.amountWithdrawable(seller));
+
         // if both seller and buyer approved closing before the execute() call and expiry hasn't been reached, seller should be paid the totalAmount
         if (_approved && !escrowTest.isExpired()) {
             // seller should have received totalAmount
             assertGt(
                 _preBalance,
-                escrowTestAddr.balance,
+                _postBalance,
                 "escrow's balance should have been reduced by 'totalAmount'"
             );
             assertGt(
@@ -338,16 +346,12 @@ contract EthLockerTest is Test {
                 _preSellerBalance,
                 "seller's balance should have been increased by 'totalAmount'"
             );
-            assertEq(
-                escrowTestAddr.balance,
-                0,
-                "escrow balance should be zero"
-            );
+            assertEq(_postBalance, 0, "escrow balance should be zero");
         } else if (escrowTest.isExpired()) {
             //balances should not change if expired
             assertEq(
                 _preBalance,
-                escrowTestAddr.balance,
+                _postBalance,
                 "escrow's balance should not change yet if expired ('amountWithdrawable' mappings will update)"
             );
             assertEq(
