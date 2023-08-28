@@ -620,6 +620,7 @@ contract TokenLockerTest is Test {
     }
 
     function testWithdraw(address _caller) external {
+        // since we're testing only the difference in the amountWithdrawable for '_caller', no need to mock the aggregate 'pendingWithdraw'
         uint256 _preBalance = testToken.balanceOf(escrowTestAddr);
         uint256 _preAmtWithdrawable = escrowTest.amountWithdrawable(_caller);
         bool _reverted;
@@ -651,16 +652,19 @@ contract TokenLockerTest is Test {
     }
 
     function testExecute() external {
-        // if 'totalAmount' isn't in escrow, expect revert
-        if (testToken.balanceOf(escrowTestAddr) != escrowTest.totalAmount()) {
+        // deal 'totalAmount' in escrow, otherwise sellerApproval() will be false (which is captured by this test anyway)
+        testToken.mintToken(escrowTestAddr, escrowTest.totalAmount());
+
+        // if 'totalAmount' (accounting for any amounts withdrawable) isn't in escrow, expect revert
+        // we just subtract buyer and seller's amountWithdrawable, if any (rather than mocking 'pendingWithdraw')
+        uint256 _preBalance = testToken.balanceOf(escrowTestAddr) -
+            (escrowTest.amountWithdrawable(buyer) +
+                escrowTest.amountWithdrawable(seller));
+        if (_preBalance != escrowTest.totalAmount()) {
             vm.expectRevert();
             escrowTest.execute();
         }
 
-        // deal 'totalAmount' in escrow, otherwise sellerApproval() will be false (which is captured by this test anyway)
-        testToken.mintToken(escrowTestAddr, escrowTest.totalAmount());
-
-        uint256 _preBalance = testToken.balanceOf(escrowTestAddr);
         uint256 _preBuyerBalance = testToken.balanceOf(buyer);
         uint256 _preSellerBalance = testToken.balanceOf(seller);
         bool _approved;
@@ -675,6 +679,10 @@ contract TokenLockerTest is Test {
         assertTrue(!escrowTest.sellerApproved());
         assertTrue(!escrowTest.buyerApproved());
 
+        uint256 _postBalance = testToken.balanceOf(escrowTestAddr) -
+            (escrowTest.amountWithdrawable(buyer) +
+                escrowTest.amountWithdrawable(seller));
+
         // if both seller and buyer approved closing before the execute() call, proceed
         if (_approved) {
             // if the expiration time has been met or surpassed, check the same things as in 'testCheckIfExpired()' and that both approval booleans were deleted
@@ -682,18 +690,18 @@ contract TokenLockerTest is Test {
             if (escrowTest.isExpired()) {
                 assertGt(
                     _preBalance,
-                    testToken.balanceOf(escrowTestAddr),
+                    _postBalance,
                     "escrow's balance should have been reduced by 'totalAmount'"
                 );
                 assertGt(
-                    testToken.balanceOf(escrowTestAddr),
+                    testToken.balanceOf(buyer),
                     _preBuyerBalance,
-                    "buyer's balance should have been increased by 'totalAmount'"
+                    "buyer's balance should have been increased by at least partial refund"
                 );
             } else {
                 assertGt(
                     _preBalance,
-                    testToken.balanceOf(escrowTestAddr),
+                    _postBalance,
                     "escrow's balance should have been reduced by 'totalAmount'"
                 );
                 assertGt(
@@ -701,11 +709,7 @@ contract TokenLockerTest is Test {
                     _preSellerBalance,
                     "seller's balance should have been increased by 'totalAmount'"
                 );
-                assertEq(
-                    testToken.balanceOf(escrowTestAddr),
-                    0,
-                    "escrow balance should be zero"
-                );
+                assertEq(_postBalance, 0, "escrow balance should be zero");
             }
         }
     }
@@ -747,7 +751,10 @@ contract TokenLockerTest is Test {
         vm.stopPrank();
         testToken.mintToken(conditionEscrowTestAddr, totalAmount);
 
-        uint256 _preBalance = testToken.balanceOf(conditionEscrowTestAddr);
+        // we just subtract buyer and seller's amountWithdrawable, if any (rather than mocking 'pendingWithdraw') since this is !openOffer
+        uint256 _preBalance = testToken.balanceOf(conditionEscrowTestAddr) -
+            (conditionEscrowTest.amountWithdrawable(buyer) +
+                conditionEscrowTest.amountWithdrawable(seller));
         uint256 _preBuyerBalance = testToken.balanceOf(buyer);
         uint256 _preSellerBalance = testToken.balanceOf(seller);
         bool _approved;
@@ -764,6 +771,10 @@ contract TokenLockerTest is Test {
 
         conditionEscrowTest.execute();
 
+        uint256 _postBalance = testToken.balanceOf(conditionEscrowTestAddr) -
+            (conditionEscrowTest.amountWithdrawable(buyer) +
+                conditionEscrowTest.amountWithdrawable(seller));
+
         // if both seller and buyer approved closing before the execute() call, proceed
         if (_approved) {
             // if the expiration time has been met or surpassed, check the same things as in 'testCheckIfExpired()' and that both approval booleans were deleted
@@ -771,7 +782,7 @@ contract TokenLockerTest is Test {
             if (conditionEscrowTest.isExpired()) {
                 assertGt(
                     _preBalance,
-                    testToken.balanceOf(conditionEscrowTestAddr),
+                    _postBalance,
                     "escrow's balance should have been reduced by 'totalAmount'"
                 );
                 assertGt(
@@ -782,7 +793,7 @@ contract TokenLockerTest is Test {
             } else {
                 assertGt(
                     _preBalance,
-                    testToken.balanceOf(conditionEscrowTestAddr),
+                    _postBalance,
                     "escrow's balance should have been reduced by 'totalAmount'"
                 );
                 assertGt(
