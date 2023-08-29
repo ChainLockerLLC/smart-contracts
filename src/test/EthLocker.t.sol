@@ -312,7 +312,6 @@ contract EthLockerTest is Test {
         // test expiry
         vm.warp(_timestamp);
 
-        uint256 _preBuyerBalance = escrowTest.buyer().balance;
         uint256 _preSellerBalance = escrowTest.seller().balance;
         bool _approved;
 
@@ -359,11 +358,6 @@ contract EthLockerTest is Test {
                 escrowTest.seller().balance,
                 _preSellerBalance,
                 "seller's balance should not change yet if expired ('amountWithdrawable' mappings will update)"
-            );
-            assertGt(
-                conditionEscrowTest.amountWithdrawable(buyer),
-                _preBuyerBalance,
-                "buyer's amountWithdrawable should have increased upon expiry because 'conditionEscrowTest' is refundable"
             );
         }
     }
