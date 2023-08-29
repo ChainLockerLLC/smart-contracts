@@ -278,7 +278,7 @@ contract TokenLockerTest is Test {
     address internal seller = address(222222);
     address escrowTestAddr;
     address testTokenAddr;
-    // for testConditionExecute, returned in mock read() function
+    // for testConditionedExecute, returned in mock read() function
     int224 internal value;
     uint256 internal deployTime;
     uint256 internal deposit = 1e14;
@@ -286,7 +286,7 @@ contract TokenLockerTest is Test {
     uint256 internal expirationTime = 5e15;
     uint256 internal ownerPrivateKey;
 
-    // testing basic functionalities: refund, no valueCondition, identified buyer, known ERC20 compliance
+    // testing basic functionalities: refund, no valueCondition (separately tested in 'testConditionedExecute'), identified buyer, known ERC20 compliance
     function setUp() public {
         testToken = new TestToken(buyer);
         testTokenAddr = address(testToken);
@@ -651,7 +651,7 @@ contract TokenLockerTest is Test {
         }
     }
 
-    function testExecute() external {
+    function testExecute(uint256 _timestamp) external {
         // deal 'totalAmount' in escrow, otherwise sellerApproval() will be false (which is captured by this test anyway)
         testToken.mintToken(escrowTestAddr, escrowTest.totalAmount());
 
@@ -660,17 +660,16 @@ contract TokenLockerTest is Test {
         uint256 _preBalance = testToken.balanceOf(escrowTestAddr) -
             (escrowTest.amountWithdrawable(buyer) +
                 escrowTest.amountWithdrawable(seller));
-        if (_preBalance != escrowTest.totalAmount()) {
-            vm.expectRevert();
-            escrowTest.execute();
-        }
 
-        uint256 _preBuyerBalance = testToken.balanceOf(buyer);
         uint256 _preSellerBalance = testToken.balanceOf(seller);
         bool _approved;
 
-        if (!escrowTest.sellerApproved() || !escrowTest.buyerApproved())
-            vm.expectRevert();
+        if (
+            !escrowTest.sellerApproved() ||
+            !escrowTest.buyerApproved() ||
+            _preBalance != escrowTest.totalAmount() ||
+            escrowTest.expirationTime() <= _timestamp
+        ) vm.expectRevert();
         else _approved = true;
 
         escrowTest.execute();
@@ -685,18 +684,13 @@ contract TokenLockerTest is Test {
 
         // if both seller and buyer approved closing before the execute() call, proceed
         if (_approved) {
-            // if the expiration time has been met or surpassed, check the same things as in 'testCheckIfExpired()' and that both approval booleans were deleted
+            // if the expiration time has been met or surpassed, check the same things as in 'testCheckIfExpired()'
             // else, seller should have received totalAmount
             if (escrowTest.isExpired()) {
-                assertGt(
+                assertEq(
                     _preBalance,
                     _postBalance,
-                    "escrow's balance should have been reduced by 'totalAmount'"
-                );
-                assertGt(
-                    testToken.balanceOf(buyer),
-                    _preBuyerBalance,
-                    "buyer's balance should have been increased by at least partial refund"
+                    "escrow's balance should not change, just amountWithdrawable mappings"
                 );
             } else {
                 assertGt(
@@ -755,13 +749,16 @@ contract TokenLockerTest is Test {
         uint256 _preBalance = testToken.balanceOf(conditionEscrowTestAddr) -
             (conditionEscrowTest.amountWithdrawable(buyer) +
                 conditionEscrowTest.amountWithdrawable(seller));
-        uint256 _preBuyerBalance = testToken.balanceOf(buyer);
+        uint256 _preBuyerWithdrawable = conditionEscrowTest.amountWithdrawable(
+            buyer
+        );
         uint256 _preSellerBalance = testToken.balanceOf(seller);
         bool _approved;
 
         if (
             !conditionEscrowTest.sellerApproved() ||
             !conditionEscrowTest.buyerApproved() ||
+            _preBalance != conditionEscrowTest.totalAmount() ||
             (_valueCondition == 1 && _fuzzedValue > _maxValue) ||
             (_valueCondition == 2 && _fuzzedValue < _minValue) ||
             (_valueCondition == 3 &&
@@ -775,20 +772,20 @@ contract TokenLockerTest is Test {
             (conditionEscrowTest.amountWithdrawable(buyer) +
                 conditionEscrowTest.amountWithdrawable(seller));
 
-        // if both seller and buyer approved closing before the execute() call, proceed
+        // if no reversion, proceed
         if (_approved) {
             // if the expiration time has been met or surpassed, check the same things as in 'testCheckIfExpired()' and that both approval booleans were deleted
             // else, seller should have received totalAmount
             if (conditionEscrowTest.isExpired()) {
-                assertGt(
+                assertEq(
                     _preBalance,
                     _postBalance,
-                    "escrow's balance should have been reduced by 'totalAmount'"
+                    "escrow's balance should not change, just amountWithdrawable mappings"
                 );
                 assertGt(
-                    testToken.balanceOf(buyer),
-                    _preBuyerBalance,
-                    "buyer's balance should have been increased by 'totalAmount'"
+                    conditionEscrowTest.amountWithdrawable(buyer),
+                    _preBuyerWithdrawable,
+                    "buyer's amountWithdrawable should have increased upon expiry because 'conditionEscrowTest' is refundable"
                 );
             } else {
                 assertGt(
@@ -805,6 +802,7 @@ contract TokenLockerTest is Test {
         }
     }
 
+    // this will be called by escrowTest in 'execute' if valueCondition != 0
     function read() public view returns (int224, uint256) {
         return (value, block.timestamp);
     }
