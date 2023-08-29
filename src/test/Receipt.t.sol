@@ -146,14 +146,18 @@ contract ReceiptTest is Test {
         uint256 _timestamp,
         int224 _value
     ) public {
-        // assume reasonable numbers
-        vm.assume(_tokenAmount < 2 ^ 100 && _value < 2 ^ 100);
+        if (_value > 0)
+            vm.assume(
+                _tokenAmount < type(uint128).max &&
+                    uint224(_value) < type(uint128).max
+            );
         // deploy a new 18 decimal ERC20 for testing
         testToken = new ERC20();
         address _token = address(testToken);
         value = _value;
         timestamp = _timestamp;
         uint256 _decimals = testToken.decimals();
+        bool _reverted;
         // update the proxy mapping for the new '_token' to address(this) so the test read() function is called
         receiptTest.updateProxy(_token, address(this));
         if (
@@ -161,7 +165,10 @@ contract ReceiptTest is Test {
             _timestamp > block.timestamp ||
             _timestamp + ONE_DAY < block.timestamp ||
             _value < int224(0)
-        ) vm.expectRevert();
+        ) {
+            _reverted = true;
+            vm.expectRevert();
+        }
 
         (uint256 _testId, uint256 _usdValue) = receiptTest.printReceipt(
             _token,
@@ -169,15 +176,17 @@ contract ReceiptTest is Test {
             _decimals
         );
 
-        if (_testId != 0)
+        if (_testId != 0 && !_reverted) {
             assertGt(_testId, 0, "test's 'paymentId' did not increment");
-        assertEq(
-            _usdValue,
-            receiptTest.paymentIdToUsdValue(_testId),
-            "paymentIdToUsdValue mapping did not update"
-        );
+            assertEq(
+                _usdValue,
+                receiptTest.paymentIdToUsdValue(_testId),
+                "paymentIdToUsdValue mapping did not update"
+            );
+        }
     }
 
+    // this will be called by receiptTest in 'printReceipt'
     function read() public view returns (int224, uint256) {
         return (value, timestamp);
     }
