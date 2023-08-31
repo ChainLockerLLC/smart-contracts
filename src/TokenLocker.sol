@@ -193,9 +193,9 @@ contract TokenLocker is ReentrancyGuard, SafeTransferLib {
         Both
     }
 
-    // Receipt.sol contract address, ETH mainnet (CURRENTLY PLACEHOLDER)
-    // constant rather than immutable to ease stack in constructor
-    IReceipt internal constant RECEIPT = IReceipt(address(1234));
+    // Receipt.sol contract address, ETH mainnet
+    IReceipt internal constant RECEIPT =
+        IReceipt(0xf838D6829fcCBedCB0B4D8aD58cb99814F935BA8);
 
     // 60 seconds * 60 minutes * 24 hours
     uint256 internal constant ONE_DAY = 86400;
