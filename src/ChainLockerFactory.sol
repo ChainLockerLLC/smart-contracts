@@ -146,7 +146,7 @@ contract ChainLockerFactory {
         address payable _buyer,
         address _tokenContract,
         address _dataFeedProxyAddress
-    ) external payable {
+    ) external payable returns (address) {
         if (sanctionCheck.isSanctioned(msg.sender))
             revert ChainLockerFactory_DeployerSanctioned();
         uint8 _condition = uint8(_valueCondition);
@@ -202,6 +202,7 @@ contract ChainLockerFactory {
                 address(_newEthLocker),
                 address(0)
             );
+            return address(_newEthLocker);
         } else {
             TokenLocker _newTokenLocker = new TokenLocker(
                 _refundable,
@@ -222,6 +223,7 @@ contract ChainLockerFactory {
                 address(_newTokenLocker),
                 _tokenContract
             );
+            return address(_newTokenLocker);
         }
     }
 
