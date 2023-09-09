@@ -4,11 +4,15 @@ _Please note that all code, files, forms, templates, or other materials provided
 
 _Any users, developers, or adapters of the Repo Contents or any deployments or instances thereof should proceed with caution and use at their own risk._
 
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+***
 
-ChainLocker is a non-custodial, user-defined-and-deployed escrow deployment protocol. Each ChainLocker is a separate contract deployment, and is designed to only hold one type of asset. The locked assets are programmatically released provided all deployer-defined conditions are met when <code>execute()</code> is called, including optional oracle-fed data conditions which are known as “value conditions,” or otherwise transferred at the deployer-defined expiry time according to the deployer-defined deposit and refundability rules. 
+ChainLocker is a non-custodial, user-defined-and-deployed escrow deployment protocol. Each ChainLocker is a separate contract deployment, and is designed to only hold one type of asset. 
 
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+Deployers may choose to create an 'openOffer' ChainLocker that is open to any counterparty, a 'refundable' ChainLocker which enables the counterparty to withdraw their 'deposit' if there has been no successful execution before the 'expirationTime', a ChainLocker with execution contigent on an oracle-fed data condition known as a 'ValueCondition', and more.
+
+The locked assets are programmatically released provided all deployer-defined conditions are met when <code>execute()</code> is called; if the necessary conditions are not met before the deployer-defined expiry, assets become withdrawable according to the deployer-defined deposit and refundability rules. 
+
+***
 
 
 ## ChainLockerFactory.sol
@@ -33,8 +37,7 @@ Factory contract for ChainLocker deployments (TokenLocker or EthLocker) based up
 -	<code>_dataFeedProxy</code> address which will be called if <code>_valueCondition</code> > 0 in <code>execute</code> which must correctly implement the <code>read()</code> function as defined in the <code>IProxy interface</code>. Intended to utilize API3’s dAPIs.
 
 
-
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+***
 
 
 ## EthLocker.sol
@@ -67,8 +70,7 @@ Addresses with a nonzero <code>amountWithdrawable</code> mapped value can withdr
 When each of <code>buyer</code> and <code>seller</code> are ready to execute the EthLocker, they must call <code>readyToExecute()</code>. Following this, any address may call <code>execute()</code>, and if the <code>totalAmount</code> is held by the ChainLocker, <code>expirationTime</code> has not yet been met, and (if applicable) the <code>ValueCondition</code> is satisfied, the EthLocker will execute. 
 
 
-
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+***
 
 
 ## TokenLocker.sol
@@ -102,8 +104,7 @@ Addresses with a nonzero <code>amountWithdrawable</code> mapped value can withdr
 When each of <code>buyer</code> and <code>seller</code> are ready to execute the TokenLocker, they must call <code>readyToExecute()</code>. Following this, any address may call <code>execute()</code>, and if the <code>totalAmount</code> is held by the ChainLocker, <code>expirationTime</code> has not yet been met, and (if applicable) the <code>ValueCondition</code> is satisfied, the TokenLocker will execute. 
 
 
-
-O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O=O
+***
 
 
 ## Receipt.sol
