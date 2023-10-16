@@ -6,7 +6,7 @@ _Any users, developers, or adapters of the Repo Contents or any deployments or i
 
 ***
 
-ChainLocker is a non-custodial, user-defined-and-deployed escrow deployment protocol. Each ChainLocker is a separate contract deployment, and is designed to only hold one type of asset. 
+ChainLocker is a non-custodial, user-defined-and-deployed escrow deployment protocol. Each ChainLocker is a separate contract deployment, and is designed to only hold one type of asset per deployment. 
 
 Deployers may choose to create an 'openOffer' ChainLocker that is open to any counterparty, a 'refundable' ChainLocker which enables the counterparty to withdraw their 'deposit' if there has been no successful execution before the 'expirationTime', a ChainLocker with execution contigent on an oracle-fed data condition known as a 'ValueCondition', and more.
 
