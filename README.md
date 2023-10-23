@@ -19,7 +19,7 @@ The locked assets are programmatically released provided all deployer-defined co
 
 Factory contract for ChainLocker deployments (TokenLocker or EthLocker) based upon the various parameters passed to <code>deployChainLocker()</code>. For deployments with a non-zero <code>ValueCondition</code>, the execution of the ChainLocker pre-expiry is reliant upon the accurate operation and security of the applicable <code>dataFeedProxy</code> contract (specifically its <code>read()</code> function) so users are advised to carefully verify and monitor such contract. The parameters for a ChainLocker deployment by calling <code>deployChainLocker()</code> are:
 
--	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at expiry
+-	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at the <code>expirationTime</code>
 -	<code>_openOffer</code>: Boolean of whether the ChainLocker is open to any buyer address (<code>true</code>) or only the designated <code> buyer</code> address
 -	<code>_valueCondition</code>: enum (uint8) of external data value condition for execution. Note that a ChainLocker user/deployer can arrange for a bespoke proxy contract that conforms to the IProxy interface (i.e. has a <code>read()</code> view function that returns a timestamp and int224 value), the returned ‘value’ can be used for any type of non-negative numerical data, and the “Both” ValueCondition can be leveraged to require a response between a minimum and maximum value or an exact response (by submitting the same value for <code>_minimumValue</code> and <code>_maximumValue</code>). Enum values are as follows:
     + 0 ('None'): no value contingency to ChainLocker execution; <code>_maximumValue</code>, <code>_minimumValue</code> and <code>_dataFeedProxyAddress</code> params are ignored;
@@ -44,7 +44,7 @@ The ChainLockerFactory contract contains an inactive fee switch for deployments,
 ## EthLocker.sol
 
 Non-custodial escrow smart contract using the native gas token as locked asset, and initiated with the following immutable parameters (supplied by the ChainLockerFactory’s <code>deployChainLocker()</code> function or directly in the EthLocker <code>constructor()</code>):
--	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at expiry
+-	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at the <code>expirationTime</code>
 -	<code>_openOffer</code>: Boolean of whether the EthLocker is open to any depositing address (<code>true</code>) or only the designated <code>buyer</code> address
 -	<code>_valueCondition</code>: enum (uint8) of external data value condition for execution. Enum values are as follows (the same as specified above for <code>deployChainLocker()</code> in <code>ChainLockerFactory</code>):
     + 0 ('None'): no value contingency to execution; <code>_maximumValue</code>, <code>_minimumValue</code> and <code>_dataFeedProxyAddress</code> params are ignored;
@@ -77,7 +77,7 @@ When each of <code>buyer</code> and <code>seller</code> are ready to execute the
 ## TokenLocker.sol
 
 Non-custodial escrow smart contract with mirrored functionality as ‘EthLocker’, but using an ERC20-compliant token as locked asset and the ability to lock such tokens via EIP2612 ‘permit’ function (if applicable). Initiated with the following immutable parameters (supplied by the ChainLockerFactory’s <code>deployChainLocker()</code> function or directly in the TokenLocker <code>constructor()</code>):
--	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at expiry
+-	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at the <code>expirationTime</code>
 -	<code>_openOffer</code>: Boolean of whether the TokenLocker is open to any depositing address (<code>true</code>) or only the designated <code>buyer</code> address
 -	<code>_valueCondition</code>: enum (uint8) of external data value condition for execution. Enum values are as follows (the same as specified above for <code>deployChainLocker()</code> in <code>ChainLockerFactory</code>):
     + 0 ('None'): no value contingency to execution; <code>_maximumValue</code>, <code>_minimumValue</code> and <code>_dataFeedProxyAddress</code> params are ignored;
