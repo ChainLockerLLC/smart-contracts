@@ -64,7 +64,7 @@ Non-custodial escrow smart contract using the native gas token as locked asset, 
 
 If <code>seller</code> wishes to reject a depositor or <code>buyer</code>, seller may call <code>rejectDepositor()</code>, supplying the applicable address to be rejected (the applicable <code>amountWithdrawable</code> mapping will update for the amount the rejected address had previously deposited into the EthLocker). 
 
-The <code>checkIfExpired()</code> function may also be called by any address at any time, and if it has indeed expired, the <code>amountWithdrawable</code> mapping(s) will update according to the deployer-defined refundability rules. 
+The <code>checkIfExpired()</code> function may also be called by any address at any time, and if the <code>expirationDate</code> has been met, the <code>amountWithdrawable</code> mapping(s) will update according to the deployer-defined refundability rules. 
 
 Addresses with a nonzero <code>amountWithdrawable</code> mapped value can withdraw by calling <code>withdraw()</code>.
 
@@ -98,7 +98,7 @@ Non-custodial escrow smart contract with mirrored functionality as â€˜EthLockerâ
 
 If <code>seller</code> wishes to reject a depositor or <code>buyer</code>, seller may call <code>rejectDepositor()</code>, supplying the applicable address to be rejected (the applicable <code>amountWithdrawable</code> mapping will update for the amount the rejected address had previously deposited into the TokenLocker). 
 
-The <code>checkIfExpired()</code> function may also be called by any address at any time, and if it has indeed expired, the <code>amountWithdrawable</code> mapping(s) will update according to the deployer-defined refundability rules. 
+The <code>checkIfExpired()</code> function may also be called by any address at any time, and if the <code>expirationDate</code> has been met, the <code>amountWithdrawable</code> mapping(s) will update according to the deployer-defined refundability rules. 
 
 Addresses with a nonzero <code>amountWithdrawable</code> mapped value can withdraw by calling <code>withdraw()</code>.
 
