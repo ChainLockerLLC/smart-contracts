@@ -12,12 +12,25 @@ Deployers may choose to create an 'openOffer' ChainLocker that is open to any co
 
 The locked assets are programmatically released provided all deployer-defined conditions are met when <code>execute()</code> is called; if the necessary conditions are not met before the deployer-defined expiry, assets become withdrawable according to the deployer-defined deposit and refundability rules. 
 
+tl;dr:
+
+(1) User calls <code>deployChainLocker()</code> with all applicable parameters to deploy a ChainLocker
+
+(2) Buyer (or any address, if the ChainLocker is an open offer) deposits the applicable assets into the ChainLocker
+
+(3) Buyer and Seller each call <code>readytoExecute()</code> when ready to complete the transaction
+
+(4) Anyone may call <code>execute()</code>. If the total amount is in the ChainLocker, each party is ready to execute, the expiration time has not been met and any applicable Value Condition check is satisfied, the ChainLocker executes and the total amount is transferred to Seller
+
+(5) If the expiration time has been reached when <code>execute()</code> is called, the refundability rules apply and each party must call <code>withdraw()</code> to withdraw their respective amounts. If Seller decided to reject a depositor/Buyer by calling <code>rejectDepositor()</code>, that address must call <code>withdraw()</code> to withdraw their deposited amount
+
+
 ***
 
 
 ## ChainLockerFactory.sol
 
-Factory contract for ChainLocker deployments (TokenLocker or EthLocker) based upon the various parameters passed to <code>deployChainLocker()</code>. For deployments with a non-zero <code>ValueCondition</code>, the execution of the ChainLocker pre-expiry is reliant upon the accurate operation and security of the applicable <code>dataFeedProxy</code> contract (specifically its <code>read()</code> function) so users are advised to carefully verify and monitor such contract. The parameters for a ChainLocker deployment by calling <code>deployChainLocker()</code> are:
+Factory contract for ChainLocker deployments (TokenLocker or EthLocker) based upon the various parameters passed to <code>deployChainLocker()</code>. For deployments with a non-zero <code>ValueCondition</code>, the execution of the ChainLocker pre-expiry is reliant upon the accurate operation and security of the applicable <code>dataFeedProxy</code> contract (specifically its <code>read()</code> function) so users are advised to carefully verify and monitor such contract. The deployer of a ChainLocker does not need to be buyer or seller, and each of buyer and seller can replace their own address after deployment. The parameters for a ChainLocker deployment by calling <code>deployChainLocker()</code> are:
 
 -	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at the <code>expirationTime</code>
 -	<code>_openOffer</code>: Boolean of whether the ChainLocker is open to any buyer address (<code>true</code>) or only the designated <code> buyer</code> address
