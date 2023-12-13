@@ -10,7 +10,7 @@ ChainLocker is a non-custodial, user-defined-and-deployed escrow deployment prot
 
 Deployers may choose to create an 'openOffer' ChainLocker that is open to any counterparty, a 'refundable' ChainLocker which enables the counterparty to withdraw their 'deposit' if there has been no successful execution before the 'expirationTime', a ChainLocker with execution contigent on an oracle-fed data condition known as a 'ValueCondition', and more.
 
-The locked assets are programmatically released provided all deployer-defined conditions are met when <code>execute()</code> is called; if the necessary conditions are not met before the deployer-defined expiry, assets become withdrawable according to the deployer-defined deposit and refundability rules. 
+The locked assets are programmatically released provided all deployer-defined conditions are met when <code>execute()</code> is called. ChainLockers may be re-used so long as the expiration time has not been reached. If the necessary conditions are not met before the deployer-defined expiry, assets become withdrawable according to the deployer-defined deposit and refundability rules. 
 
 tl;dr:
 
@@ -75,6 +75,8 @@ Non-custodial escrow smart contract using the native gas token as locked asset, 
 
 <code>Buyer</code> deposits into an EthLocker by sending the proper amount of wei directly to the contract address, invoking its <code>receive()</code> function. For open offers, the entire <code>totalAmount</code> must be deposited to become the <code>buyer</code>. 
 
+The <code>receive()</code> function has a condition check to ensure no more than <code>totalAmount</code> - <code>pendingWithdraw</code> can be sent to the EthLocker. 
+
 If <code>seller</code> wishes to reject a depositor or <code>buyer</code>, seller may call <code>rejectDepositor()</code>, supplying the applicable address to be rejected (the applicable <code>amountWithdrawable</code> mapping will update for the amount the rejected address had previously deposited into the EthLocker). 
 
 The <code>checkIfExpired()</code> function may also be called by any address at any time, and if the <code>expirationDate</code> has been met, the <code>amountWithdrawable</code> mapping(s) will update according to the deployer-defined refundability rules. 
@@ -108,6 +110,8 @@ Non-custodial escrow smart contract with mirrored functionality as ‘EthLocker�
 -	<code>_dataFeedProxy</code>: address which will be called if <code>_valueCondition</code> > 0 in <code>execute</code> which must correctly implement the <code>read()</code> function as defined in the <code>IProxy interface</code>. Intended to utilize API3’s dAPIs.
 
 <code>Buyer</code> deposits into an TokenLocker via either (A) <code>depositTokensWithPermit()</code> (if the applicable token contract has an EIP2612 permit() function) supplying the address that is transferring such tokens, the amount of tokens, and remainder of the permit() signature parameters (deadline, v, r, s), or (B) calling the token's <code>approve()</code> function supplying the address of the TokenLocker and the amount of tokens to be deposited, then calling <code>depositTokens()</code> in the TokenLocker supplying the address that approved the TokenLocker accordingly and is transferring such tokens, and the amount of tokens, in order to send the proper amount of tokens to the TokenLocker. For open offers, the entire <code>totalAmount</code> must be deposited to become the <code>buyer</code>. 
+
+While the deposit functions have condition checks to ensure no more than <code>totalAmount</code> - <code>pendingWithdraw</code> is deposited in the TokenLocker via such functions, users must be careful not to send any tokens directly to the TokenLocker's contract address as they will not be recoverable. Unlike EthLockers, one cannot properly deposit to a TokenLocker by simply transferring to the address; the proper functions must be called. 
 
 If <code>seller</code> wishes to reject a depositor or <code>buyer</code>, seller may call <code>rejectDepositor()</code>, supplying the applicable address to be rejected (the applicable <code>amountWithdrawable</code> mapping will update for the amount the rejected address had previously deposited into the TokenLocker). 
 
