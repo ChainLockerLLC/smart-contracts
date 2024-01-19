@@ -73,11 +73,11 @@ Non-custodial escrow smart contract using the native gas token as locked asset, 
 -	<code>_buyer</code>: address payable of the buyer (depositor of deposit/totalAmount and recipient of deposit’s return at expiry if <code>refundable</code> == true). Replaceable by <code>buyer</code> post-deployment by calling <code>updateBuyer</code> with the new address payable. Ignored if <code>openOffer</code> == true;
 -	<code>_dataFeedProxy</code>: address which will be called if <code>_valueCondition</code> > 0 in <code>execute</code> which must correctly implement the <code>read()</code> function as defined in the <code>IProxy interface</code>. Intended to utilize API3’s dAPIs.
 
-<code>Buyer</code> deposits into an EthLocker by sending the proper amount of wei directly to the contract address, invoking its <code>receive()</code> function. For open offers, the entire <code>totalAmount</code> must be deposited to become the <code>buyer</code>. 
+<code>Buyer</code> deposits into an EthLocker by sending the proper amount of wei directly to the contract address, invoking its <code>receive()</code> function. For open offers, the entire <code>totalAmount</code> must be deposited to become the <code>buyer</code>. However, even if the EthLocker is not an open offer, any address may deposit-- this allows for greater composability and flexibility in usecases not available in TokenLockers due to the latter's necessary approve/permit + deposit pattern. 
 
 The <code>receive()</code> function has a condition check to ensure no more than <code>totalAmount</code> - <code>pendingWithdraw</code> can be sent to the EthLocker. 
 
-If <code>seller</code> wishes to reject a depositor or <code>buyer</code>, seller may call <code>rejectDepositor()</code>, supplying the applicable address to be rejected (the applicable <code>amountWithdrawable</code> mapping will update for the amount the rejected address had previously deposited into the EthLocker). 
+If <code>seller</code> wishes to reject a depositor or <code>buyer</code>, seller may call <code>rejectDepositor()</code>, supplying the applicable address to be rejected (the applicable <code>amountWithdrawable</code> mapping will update for the amount the rejected address had previously deposited into the EthLocker, allowing such rejected address to withdraw their corresponding amount). 
 
 The <code>checkIfExpired()</code> function may also be called by any address at any time, and if the <code>expirationDate</code> has been met, the <code>amountWithdrawable</code> mapping(s) will update according to the deployer-defined refundability rules. 
 
@@ -113,7 +113,7 @@ Non-custodial escrow smart contract with mirrored functionality as ‘EthLocker�
 
 While the deposit functions have condition checks to ensure no more than <code>totalAmount</code> - <code>pendingWithdraw</code> is deposited in the TokenLocker via such functions, users must be careful not to send any tokens directly to the TokenLocker's contract address as they will not be recoverable. Unlike EthLockers, one cannot properly deposit to a TokenLocker by simply transferring to the address; the proper functions must be called. 
 
-If <code>seller</code> wishes to reject a depositor or <code>buyer</code>, seller may call <code>rejectDepositor()</code>, supplying the applicable address to be rejected (the applicable <code>amountWithdrawable</code> mapping will update for the amount the rejected address had previously deposited into the TokenLocker). 
+If <code>seller</code> wishes to reject a depositor or <code>buyer</code>, seller may call <code>rejectDepositor()</code>, supplying the applicable address to be rejected (the applicable <code>amountWithdrawable</code> mapping will update for the amount the rejected address had previously deposited into the TokenLocker, allowing such rejected address to withdraw their corresponding amount). 
 
 The <code>checkIfExpired()</code> function may also be called by any address at any time, and if the <code>expirationDate</code> has been met, the <code>amountWithdrawable</code> mapping(s) will update according to the deployer-defined refundability rules. 
 
