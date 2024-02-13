@@ -91,7 +91,7 @@ When each of <code>buyer</code> and <code>seller</code> are ready to execute the
 
 ## TokenLocker.sol
 
-Non-custodial escrow smart contract with mirrored functionality as ‘EthLocker’, but using an ERC20-compliant token as locked asset and the ability to lock such tokens via EIP2612 ‘permit’ function (if applicable). Initiated with the following immutable parameters (supplied by the ChainLockerFactory’s <code>deployChainLocker()</code> function or directly in the TokenLocker <code>constructor()</code>):
+Non-custodial escrow smart contract with mirrored functionality as ‘EthLocker’, but using an ERC20-compliant token as locked asset and the ability to lock such tokens via EIP2612 ‘permit’ function (if applicable). **Fee-on-transfer and rebasing tokens are not supported** as an opinionated optimization in favor of immutable fixed amounts. Initiated with the following immutable parameters (supplied by the ChainLockerFactory’s <code>deployChainLocker()</code> function or directly in the TokenLocker <code>constructor()</code>):
 -	<code>_refundable</code>: Boolean of whether the deposit amount is refundable to <code>buyer</code> at the <code>expirationTime</code>
 -	<code>_openOffer</code>: Boolean of whether the TokenLocker is open to any depositing address (<code>true</code>) or only the designated <code>buyer</code> address
 -	<code>_valueCondition</code>: enum (uint8) of external data value condition for execution. Enum values are as follows (the same as specified above for <code>deployChainLocker()</code> in <code>ChainLockerFactory</code>):
